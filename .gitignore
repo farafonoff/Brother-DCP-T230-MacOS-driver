@@ -1,0 +1,13 @@
+# Local test harness (contains user-specific paths)
+test.sh
+
+# Docker reference-capture harness needs Brother's closed-source tree
+# staged in as build context; it must never be committed.
+docker/dcpt230/
+docker/in/
+docker/out/
+
+# Generated / temporary
+*.pyc
+__pycache__/
+.DS_Store

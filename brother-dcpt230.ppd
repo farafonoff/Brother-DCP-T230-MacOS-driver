@@ -1,0 +1,245 @@
+*PPD-Adobe: "4.3"
+*%================================================================
+*% Brother DCP-T230 - native macOS PPD (open-source reimplementation)
+*%
+*% Pairs with the `brother_dcpt230_pjl` Python CUPS filter.  The
+*% filter accepts PWG Raster on stdin and emits PJL-wrapped PWG
+*% Raster for USB delivery.  macOS handles all the work of turning
+*% PDFs into PWG Raster via its built-in filter chain
+*% (cgpdftoraster -> rastertopwg -> this filter -> USB backend).
+*%
+*% Protocol reverse-engineered from Brother's Linux binary
+*% `brdcpt230filter`; see README.md for the analysis.
+*%================================================================
+
+*FormatVersion: "4.3"
+*FileVersion:   "1.0"
+*LanguageVersion: English
+*LanguageEncoding: ISOLatin1
+*PCFileName: "BRT230.PPD"
+*Manufacturer: "Brother"
+*Product: "(DCP-T230)"
+*ModelName: "Brother DCP-T230"
+*ShortNickName: "DCP-T230"
+*NickName: "Brother DCP-T230 (PWG/PJL native)"
+*PSVersion: "(3010.000) 0"
+
+*1284DeviceID: "MFG:Brother;MDL:DCP-T230;CMD:PJL,PWGRaster;"
+
+*cupsVersion: 2.2
+*cupsManualCopies: True
+*cupsModelNumber: 0
+*cupsLanguages: "en"
+*cupsFilter: "image/pwg-raster 0 brother_dcpt230_pjl"
+
+*% Raster format hints: tell cgpdftoraster / rastertopwg what to produce.
+*% The DCP-T230 wants 8-bit-per-color sRGB (colorspace 19) for colour, or
+*% 8-bit sGray (colorspace 18) for mono, at 300 DPI, uncompressed.
+*cupsRasterVersion: "3"
+*cupsBackSide: "Normal"
+
+*LanguageLevel: "3"
+*ColorDevice: True
+*DefaultColorSpace: RGB
+*FileSystem: False
+*Throughput: "12"
+*TTRasterizer: Type42
+*VariablePaperSize: False
+*DefaultResolution: 300dpi
+*FreeVM: "1700000"
+
+*% DCP-T230 is simplex-only with a single rear tray; no duplex or tray constraints needed.
+
+*%==== Media Size =================================================
+*OpenUI *PageSize/Media Size: PickOne
+*OrderDependency: 10 AnySetup *PageSize
+*DefaultPageSize: Letter
+*PageSize Letter/US Letter:                      "<</PageSize[612 792]/ImagingBBox null>>setpagedevice"
+*PageSize BrLetter_B/US Letter (Borderless):     "<</PageSize[612 792]/ImagingBBox null>>setpagedevice"
+*PageSize Legal/US Legal:                        "<</PageSize[612 1008]/ImagingBBox null>>setpagedevice"
+*PageSize Executive/Executive:                   "<</PageSize[522 756]/ImagingBBox null>>setpagedevice"
+*PageSize A4/A4:                                 "<</PageSize[595 842]/ImagingBBox null>>setpagedevice"
+*PageSize BrA4_B/A4 (Borderless):                "<</PageSize[595 842]/ImagingBBox null>>setpagedevice"
+*PageSize A5/A5:                                 "<</PageSize[420 595]/ImagingBBox null>>setpagedevice"
+*PageSize A6/A6:                                 "<</PageSize[297 420]/ImagingBBox null>>setpagedevice"
+*PageSize BrA6_B/A6 (Borderless):                "<</PageSize[297 420]/ImagingBBox null>>setpagedevice"
+*PageSize B5/JIS B5:                             "<</PageSize[516 729]/ImagingBBox null>>setpagedevice"
+*PageSize JISB6/JIS B6:                          "<</PageSize[363 516]/ImagingBBox null>>setpagedevice"
+*PageSize BrPostC4x6_S/4 x 6 in:                 "<</PageSize[288 432]/ImagingBBox null>>setpagedevice"
+*PageSize BrPostC4x6_B/4 x 6 in (Borderless):    "<</PageSize[288 432]/ImagingBBox null>>setpagedevice"
+*PageSize BrIndexC5x8_S/5 x 8 in:                "<</PageSize[360 576]/ImagingBBox null>>setpagedevice"
+*PageSize BrIndexC5x8_B/5 x 8 in (Borderless):   "<</PageSize[360 576]/ImagingBBox null>>setpagedevice"
+*PageSize BrPhotoL_S/3.5 x 5 in:                 "<</PageSize[252 360]/ImagingBBox null>>setpagedevice"
+*PageSize BrPhotoL_B/3.5 x 5 in (Borderless):    "<</PageSize[252 360]/ImagingBBox null>>setpagedevice"
+*PageSize BrPhoto2L_S/5 x 7 in:                  "<</PageSize[359 505]/ImagingBBox null>>setpagedevice"
+*PageSize BrPhoto2L_B/5 x 7 in (Borderless):     "<</PageSize[359 505]/ImagingBBox null>>setpagedevice"
+*PageSize EnvDL/DL Envelope:                     "<</PageSize[312 624]/ImagingBBox null>>setpagedevice"
+*PageSize EnvC5/C5 Envelope:                     "<</PageSize[459 649]/ImagingBBox null>>setpagedevice"
+*PageSize Env10/Com-10 Envelope:                 "<</PageSize[297 684]/ImagingBBox null>>setpagedevice"
+*PageSize EnvMonarch/Monarch Envelope:           "<</PageSize[279 540]/ImagingBBox null>>setpagedevice"
+*PageSize FanFoldGermanLegal/Folio:              "<</PageSize[612 936]/ImagingBBox null>>setpagedevice"
+*PageSize 195x270mm/16K (195x270mm):             "<</PageSize[553 765]/ImagingBBox null>>setpagedevice"
+*PageSize MexicanLegal/Mexico Legal:             "<</PageSize[612 963]/ImagingBBox null>>setpagedevice"
+*PageSize IndianLegal/India Legal:               "<</PageSize[609 978]/ImagingBBox null>>setpagedevice"
+*CloseUI: *PageSize
+
+*OpenUI *PageRegion/Media Size: PickOne
+*OrderDependency: 10 AnySetup *PageRegion
+*DefaultPageRegion: Letter
+*PageRegion Letter/US Letter:                    "<</PageSize[612 792]/ImagingBBox null>>setpagedevice"
+*PageRegion BrLetter_B/US Letter (Borderless):   "<</PageSize[612 792]/ImagingBBox null>>setpagedevice"
+*PageRegion Legal/US Legal:                      "<</PageSize[612 1008]/ImagingBBox null>>setpagedevice"
+*PageRegion Executive/Executive:                 "<</PageSize[522 756]/ImagingBBox null>>setpagedevice"
+*PageRegion A4/A4:                               "<</PageSize[595 842]/ImagingBBox null>>setpagedevice"
+*PageRegion BrA4_B/A4 (Borderless):              "<</PageSize[595 842]/ImagingBBox null>>setpagedevice"
+*PageRegion A5/A5:                               "<</PageSize[420 595]/ImagingBBox null>>setpagedevice"
+*PageRegion A6/A6:                               "<</PageSize[297 420]/ImagingBBox null>>setpagedevice"
+*PageRegion BrA6_B/A6 (Borderless):              "<</PageSize[297 420]/ImagingBBox null>>setpagedevice"
+*PageRegion B5/JIS B5:                           "<</PageSize[516 729]/ImagingBBox null>>setpagedevice"
+*PageRegion JISB6/JIS B6:                        "<</PageSize[363 516]/ImagingBBox null>>setpagedevice"
+*PageRegion BrPostC4x6_S/4 x 6 in:               "<</PageSize[288 432]/ImagingBBox null>>setpagedevice"
+*PageRegion BrPostC4x6_B/4 x 6 in (Borderless):  "<</PageSize[288 432]/ImagingBBox null>>setpagedevice"
+*PageRegion BrIndexC5x8_S/5 x 8 in:              "<</PageSize[360 576]/ImagingBBox null>>setpagedevice"
+*PageRegion BrIndexC5x8_B/5 x 8 in (Borderless): "<</PageSize[360 576]/ImagingBBox null>>setpagedevice"
+*PageRegion BrPhotoL_S/3.5 x 5 in:               "<</PageSize[252 360]/ImagingBBox null>>setpagedevice"
+*PageRegion BrPhotoL_B/3.5 x 5 in (Borderless):  "<</PageSize[252 360]/ImagingBBox null>>setpagedevice"
+*PageRegion BrPhoto2L_S/5 x 7 in:                "<</PageSize[359 505]/ImagingBBox null>>setpagedevice"
+*PageRegion BrPhoto2L_B/5 x 7 in (Borderless):   "<</PageSize[359 505]/ImagingBBox null>>setpagedevice"
+*PageRegion EnvDL/DL Envelope:                   "<</PageSize[312 624]/ImagingBBox null>>setpagedevice"
+*PageRegion EnvC5/C5 Envelope:                   "<</PageSize[459 649]/ImagingBBox null>>setpagedevice"
+*PageRegion Env10/Com-10 Envelope:               "<</PageSize[297 684]/ImagingBBox null>>setpagedevice"
+*PageRegion EnvMonarch/Monarch Envelope:         "<</PageSize[279 540]/ImagingBBox null>>setpagedevice"
+*PageRegion FanFoldGermanLegal/Folio:            "<</PageSize[612 936]/ImagingBBox null>>setpagedevice"
+*PageRegion 195x270mm/16K (195x270mm):           "<</PageSize[553 765]/ImagingBBox null>>setpagedevice"
+*PageRegion MexicanLegal/Mexico Legal:           "<</PageSize[612 963]/ImagingBBox null>>setpagedevice"
+*PageRegion IndianLegal/India Legal:             "<</PageSize[609 978]/ImagingBBox null>>setpagedevice"
+*CloseUI: *PageRegion
+
+*DefaultImageableArea: Letter
+*ImageableArea Letter/US Letter:                       "9 9 603 783"
+*ImageableArea BrLetter_B/US Letter (Borderless):      "0 0 612 792"
+*ImageableArea Legal/US Legal:                         "9 9 603 999"
+*ImageableArea Executive/Executive:                    "9 9 513 747"
+*ImageableArea A4/A4:                                  "9 9 586 833"
+*ImageableArea BrA4_B/A4 (Borderless):                 "0 0 595 842"
+*ImageableArea A5/A5:                                  "9 9 411 586"
+*ImageableArea A6/A6:                                  "9 9 288 411"
+*ImageableArea BrA6_B/A6 (Borderless):                 "0 0 297 420"
+*ImageableArea B5/JIS B5:                              "9 9 507 720"
+*ImageableArea JISB6/JIS B6:                           "9 9 354 507"
+*ImageableArea BrPostC4x6_S/4 x 6 in:                  "9 9 279 423"
+*ImageableArea BrPostC4x6_B/4 x 6 in (Borderless):     "0 0 288 432"
+*ImageableArea BrIndexC5x8_S/5 x 8 in:                 "9 9 351 567"
+*ImageableArea BrIndexC5x8_B/5 x 8 in (Borderless):    "0 0 360 576"
+*ImageableArea BrPhotoL_S/3.5 x 5 in:                  "9 9 243 351"
+*ImageableArea BrPhotoL_B/3.5 x 5 in (Borderless):     "0 0 252 360"
+*ImageableArea BrPhoto2L_S/5 x 7 in:                   "9 9 350 496"
+*ImageableArea BrPhoto2L_B/5 x 7 in (Borderless):      "0 0 359 505"
+*ImageableArea EnvDL/DL Envelope:                      "9 34 303 590"
+*ImageableArea EnvC5/C5 Envelope:                      "9 34 450 615"
+*ImageableArea Env10/Com-10 Envelope:                  "9 34 288 650"
+*ImageableArea EnvMonarch/Monarch Envelope:            "9 34 270 506"
+*ImageableArea FanFoldGermanLegal/Folio:               "9 9 603 927"
+*ImageableArea 195x270mm/16K (195x270mm):              "9 9 544 756"
+*ImageableArea MexicanLegal/Mexico Legal:              "9 9 603 954"
+*ImageableArea IndianLegal/India Legal:                "9 9 600 969"
+
+*DefaultPaperDimension: Letter
+*PaperDimension Letter/US Letter:                      "612 792"
+*PaperDimension BrLetter_B/US Letter (Borderless):     "612 792"
+*PaperDimension Legal/US Legal:                        "612 1008"
+*PaperDimension Executive/Executive:                   "522 756"
+*PaperDimension A4/A4:                                 "595.2 841.68"
+*PaperDimension BrA4_B/A4 (Borderless):                "595.2 841.68"
+*PaperDimension A5/A5:                                 "420 595"
+*PaperDimension A6/A6:                                 "297 420"
+*PaperDimension BrA6_B/A6 (Borderless):                "297 420"
+*PaperDimension B5/JIS B5:                             "516 729"
+*PaperDimension JISB6/JIS B6:                          "363 516"
+*PaperDimension BrPostC4x6_S/4 x 6 in:                 "288 432"
+*PaperDimension BrPostC4x6_B/4 x 6 in (Borderless):    "288 432"
+*PaperDimension BrIndexC5x8_S/5 x 8 in:                "360 576"
+*PaperDimension BrIndexC5x8_B/5 x 8 in (Borderless):   "360 576"
+*PaperDimension BrPhotoL_S/3.5 x 5 in:                 "252 360"
+*PaperDimension BrPhotoL_B/3.5 x 5 in (Borderless):    "252 360"
+*PaperDimension BrPhoto2L_S/5 x 7 in:                  "359 505"
+*PaperDimension BrPhoto2L_B/5 x 7 in (Borderless):     "359 505"
+*PaperDimension EnvDL/DL Envelope:                     "312 624"
+*PaperDimension EnvC5/C5 Envelope:                     "459 649"
+*PaperDimension Env10/Com-10 Envelope:                 "297 684"
+*PaperDimension EnvMonarch/Monarch Envelope:           "279 540"
+*PaperDimension FanFoldGermanLegal/Folio:              "612 936"
+*PaperDimension 195x270mm/16K (195x270mm):             "553 765"
+*PaperDimension MexicanLegal/Mexico Legal:             "612 963"
+*PaperDimension IndianLegal/India Legal:               "609 978"
+
+*%==== Paper Source ==============================================
+*OpenUI *BRInputSlot/Paper Source: PickOne
+*OrderDependency: 13 AnySetup *BRInputSlot
+*DefaultBRInputSlot: AutoSelect
+*BRInputSlot AutoSelect/Auto Select: ""
+*BRInputSlot Manual/Manual Feed:     ""
+*CloseUI: *BRInputSlot
+
+*%==== Resolution & raster format =================================
+*% Real raster resolution for cgpdftoraster / rastertopwg. We always
+*% rasterise at 300 DPI and let the printer handle PJL PRINTQUALITY
+*% separately (mirrors what Brother's Linux driver does).
+*OpenUI *Resolution/Output Resolution: PickOne
+*OrderDependency: 15 AnySetup *Resolution
+*DefaultResolution: 300dpi
+*Resolution 300dpi/300 DPI: "<</HWResolution[300 300]/cupsBitsPerColor 8/cupsBitsPerPixel 24/cupsColorSpace 19/cupsNumColors 3/cupsColorOrder 0/cupsCompression 0>>setpagedevice"
+*CloseUI: *Resolution
+
+*%==== Print Quality ==============================================
+*OpenUI *BRResolution/Print Quality: PickOne
+*OrderDependency: 14 AnySetup *BRResolution
+*DefaultBRResolution: Normal
+*BRResolution Draft/Draft (fast):    ""
+*BRResolution Normal/Normal:         ""
+*BRResolution Fine/Fine (best):      ""
+*CloseUI: *BRResolution
+
+*%==== Colour / Mono ==============================================
+*% Colour/mono also drives the raster format (sRGB vs sGray).
+*OpenUI *BRMonoColor/Color / Mono: PickOne
+*OrderDependency: 16 AnySetup *BRMonoColor
+*DefaultBRMonoColor: FullColor
+*BRMonoColor FullColor/Color:        "<</cupsBitsPerColor 8/cupsBitsPerPixel 24/cupsColorSpace 19/cupsNumColors 3/cupsColorOrder 0>>setpagedevice"
+*BRMonoColor Mono/Mono (Grayscale):  "<</cupsBitsPerColor 8/cupsBitsPerPixel 8/cupsColorSpace 18/cupsNumColors 1/cupsColorOrder 0>>setpagedevice"
+*CloseUI: *BRMonoColor
+
+*%==== Media Type =================================================
+*OpenUI *BRMediaType/Media Type: PickOne
+*OrderDependency: 17 AnySetup *BRMediaType
+*DefaultBRMediaType: Plain
+*BRMediaType Plain/Plain Paper:      ""
+*BRMediaType Inkjet/Inkjet Paper:    ""
+*BRMediaType Glossy/Glossy Paper:    ""
+*BRMediaType Recycled/Recycled Paper: ""
+*BRMediaType Env/Envelope:           ""
+*BRMediaType EnvThin/Envelope (Thin): ""
+*BRMediaType EnvThick/Envelope (Thick): ""
+*CloseUI: *BRMediaType
+
+*%==== Duplex (disabled — DCP-T230 is simplex-only) ===============
+*OpenUI *Duplex/2-Sided Printing: PickOne
+*OrderDependency: 20 AnySetup *Duplex
+*DefaultDuplex: None
+*Duplex None/Off: "<</Duplex false>>setpagedevice"
+*CloseUI: *Duplex
+
+*DefaultFont: Courier
+*Font Courier: Standard "(002.004S)" Standard ROM
+*Font Courier-Bold: Standard "(002.004S)" Standard ROM
+*Font Courier-BoldOblique: Standard "(002.004S)" Standard ROM
+*Font Courier-Oblique: Standard "(002.004S)" Standard ROM
+*Font Helvetica: Standard "(001.006S)" Standard ROM
+*Font Helvetica-Bold: Standard "(001.007S)" Standard ROM
+*Font Helvetica-BoldOblique: Standard "(001.007S)" Standard ROM
+*Font Helvetica-Oblique: Standard "(001.006S)" Standard ROM
+*Font Times-Roman: Standard "(001.007S)" Standard ROM
+*Font Times-Bold: Standard "(001.007S)" Standard ROM
+*Font Times-Italic: Standard "(001.007S)" Standard ROM
+*Font Times-BoldItalic: Standard "(001.009S)" Standard ROM
+*Font Symbol: Special "(001.007S)" Special ROM
