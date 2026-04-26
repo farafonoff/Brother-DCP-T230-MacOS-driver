@@ -2,7 +2,8 @@
 
 A tiny open-source CUPS driver for the Brother DCP-T230 inkjet that runs
 natively on macOS (Intel **and** Apple Silicon) without any Linux
-binaries, VMs, or Rosetta.
+binaries, VMs, or Rosetta. Scanning is covered too — see
+[`scanner/`](scanner/README.md).
 
 Brother's official driver ships only as x86_64 / i686 Linux ELF
 executables, which will not run on macOS. Fortunately the printer
@@ -20,6 +21,17 @@ That envelope is what this driver provides.
 | `brother-dcpt230.ppd` | PPD with media sizes, quality, color, media type. |
 | `install.sh` | Copies filter + PPD into place, optionally calls `lpadmin`. |
 | `uninstall.sh` | Removes the installed files (leaves your queues alone). |
+| [`scanner/`](scanner/README.md) | Native USB scanner driver (Python + C reference). |
+
+## Scanner
+
+A separate, self-contained native scanner driver lives in
+[`scanner/`](scanner/README.md): a Python 3 USB driver
+(`t230scan.py`), a tiny progressive-JPEG web UI (`t230web.py`), and
+the C reference implementation that documents the reverse-engineered
+protocol. It runs in user space and is not touched by `install.sh`
+in this directory. See [`scanner/README.md`](scanner/README.md) for
+usage and the wire-protocol summary.
 
 ## Filter chain
 
