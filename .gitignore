@@ -11,3 +11,10 @@ docker/out/
 *.pyc
 __pycache__/
 .DS_Store
+
+# Compiled C scanner tools
+scanner/t230scan
+scanner/getdeviceid
+scanner/dump_descriptors
+scanner/iface0_test
+scanner/check_alt

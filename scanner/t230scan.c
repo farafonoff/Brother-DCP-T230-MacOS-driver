@@ -20,6 +20,7 @@
  */
 
 #include <errno.h>
+#include <limits.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -282,6 +283,37 @@ static int bulk_read_some(libusb_device_handle *h, uint8_t ep,
     return -2;
 }
 
+/* macOS / IOUSBLib rejects bulk-IN reads whose length is not a multiple of the
+ * endpoint's max packet size with LIBUSB_ERROR_OTHER. Round a desired read
+ * length DOWN to a packet multiple (at least one packet). The device signals
+ * end-of-transfer with a short packet, so over-requesting in 512-byte units is
+ * safe — libusb returns the true byte count. */
+static int aligned_in_len(long want, uint16_t mps) {
+    if (mps == 0) mps = 512;
+    if (want < mps) return mps;
+    long n = (want / mps) * mps;
+    if (n > INT_MAX) n = (long)(INT_MAX / mps) * mps;
+    return (int)n;
+}
+
+/* Discard any data sitting in the device's bulk-IN pipe until it goes quiet, so
+ * the next request lands on a clean HTTP transaction boundary. This recovers
+ * from a half-read response (e.g. a client that hung up mid-body, or a prior
+ * aborted run that left bytes queued on the device). Returns bytes drained. */
+static long usb_drain(libusb_device_handle *h, const struct ipp_iface *iface) {
+    uint16_t mps = iface->wMaxPacketSize_in ? iface->wMaxPacketSize_in : 512;
+    uint8_t scratch[8192];
+    int want = (int)((sizeof(scratch) / mps) * mps);
+    long total = 0;
+    for (int i = 0; i < 256; i++) {
+        int got = bulk_read_some(h, iface->ep_in, scratch, want, 150);
+        if (got <= 0) break;   /* timeout / ZLP / error: pipe is quiet */
+        total += got;
+    }
+    if (total) vlog("[usb] drained %ld stale bytes from IN pipe", total);
+    return total;
+}
+
 /* Read until headers complete; returns total bytes in *buf and the offset of
  * the body start. *buf is realloc()'d as needed; caller frees. */
 struct http_resp {
@@ -313,58 +345,89 @@ static long parse_long(const char *s) {
     return strtol(s, NULL, 10);
 }
 
-/* Read exactly `need` bytes into buf, growing as needed. */
-static long read_n(libusb_device_handle *h, uint8_t ep,
-                   uint8_t **buf, long *cap, long have, long need) {
-    while (have < need) {
-        if (*cap - have < 4096) {
-            *cap = (*cap + 4096) * 2;
-            *buf = realloc(*buf, *cap);
-            if (!*buf) die("oom");
+/* In-memory chunked decoder: collapse a Transfer-Encoding: chunked body that
+ * already sits in src[0..len) into a plain byte buffer. Returns a malloc'd
+ * buffer in *out / *out_len (caller frees). Tolerant of truncation — stops at
+ * the first malformed/short chunk rather than reading more. */
+static void dechunk(const uint8_t *src, long len, uint8_t **out, long *out_len) {
+    uint8_t *o = NULL;
+    long olen = 0, ocap = 0, pos = 0;
+    while (pos < len) {
+        long le = -1;
+        for (long i = pos; i + 1 < len; i++) {
+            if (src[i] == '\r' && src[i+1] == '\n') { le = i; break; }
         }
-        int got = bulk_read_some(h, ep, *buf + have, (int)(*cap - have), BULK_TIMEOUT_MS);
-        if (got == 0) break;
-        have += got;
+        if (le < 0) break;                       /* no size line: truncated */
+        char numbuf[32] = {0};
+        long nlen = le - pos;
+        if (nlen >= (long)sizeof(numbuf)) nlen = sizeof(numbuf) - 1;
+        memcpy(numbuf, src + pos, nlen);
+        long chunk = strtol(numbuf, NULL, 16);
+        pos = le + 2;
+        if (chunk <= 0) break;                   /* 0 = end, <0 = garbage */
+        if (pos + chunk > len) chunk = len - pos; /* truncated final chunk */
+        if (olen + chunk > ocap) { ocap = (olen + chunk) * 2 + 64; o = realloc(o, ocap); if (!o) die("oom"); }
+        memcpy(o + olen, src + pos, chunk);
+        olen += chunk;
+        pos += chunk + 2;                        /* skip the chunk's trailing CRLF */
     }
-    return have;
+    *out = o;
+    *out_len = olen;
 }
 
 /* Read a full HTTP response from the device's bulk-IN pipe (assumes a request
- * has just been written and the device is about to reply). */
+ * has just been written and the device is about to reply).
+ *
+ * Strategy (pure idle-read): just keep pulling bursts off the bulk-IN pipe and
+ * appending them until a read returns nothing — a short packet, a ZLP, or a
+ * timeout, i.e. the device has gone quiet. Then parse the whole thing in
+ * memory. The first read waits a long time (the device may be busy preparing
+ * the reply); once bytes are flowing a short gap means end-of-response. This
+ * is simple and self-resyncing: every call consumes exactly one response worth
+ * of data, leaving the pipe on a clean boundary for the next request.
+ *
+ * On a garbled/empty reply it soft-fails (r.headers == NULL, r.status == 0) so
+ * the proxy can recover instead of crashing. */
+#define IDLE_TIMEOUT_MS 150
 static struct http_resp http_recv_response(libusb_device_handle *h,
                                            const struct ipp_iface *iface) {
-    long cap = 8192, have = 0;
+    struct http_resp r = {0};
+    long cap = 16384, have = 0;
     uint8_t *buf = malloc(cap);
     if (!buf) die("oom");
-    long hdr_end = -1;
-    while (1) {
-        int got = bulk_read_some(h, iface->ep_in, buf + have, (int)(cap - have), BULK_TIMEOUT_MS);
-        if (got <= 0) break;
-        have += got;
-        for (long i = 3; i < have; i++) {
-            if (buf[i-3] == '\r' && buf[i-2] == '\n' &&
-                buf[i-1] == '\r' && buf[i] == '\n') {
-                hdr_end = i + 1;
-                break;
-            }
-        }
-        if (hdr_end >= 0) break;
-        if (cap - have < 4096) {
-            cap *= 2;
-            buf = realloc(buf, cap);
-            if (!buf) die("oom");
-        }
-    }
-    if (hdr_end < 0) die("no end of HTTP headers in %ld bytes", have);
 
-    struct http_resp r = {0};
+    for (;;) {
+        if (cap - have < 4096) { cap *= 2; buf = realloc(buf, cap); if (!buf) die("oom"); }
+        int want = aligned_in_len(cap - have, iface->wMaxPacketSize_in);
+        int timeout = have ? IDLE_TIMEOUT_MS : BULK_TIMEOUT_MS;
+        int got = bulk_read_some(h, iface->ep_in, buf + have, want, timeout);
+        if (got <= 0) break;     /* short read / ZLP / timeout / error: device is quiet */
+        have += got;
+    }
+
+    /* Locate the end of the HTTP header block. */
+    long hdr_end = -1;
+    for (long i = 3; i < have; i++) {
+        if (buf[i-3] == '\r' && buf[i-2] == '\n' &&
+            buf[i-1] == '\r' && buf[i] == '\n') { hdr_end = i + 1; break; }
+    }
+    if (hdr_end < 0) {
+        fprintf(stderr, "http_recv: no end of HTTP headers in %ld bytes\n", have);
+        free(buf);
+        return r;   /* soft-fail */
+    }
+
     r.headers = malloc(hdr_end + 1);
     memcpy(r.headers, buf, hdr_end);
     r.headers[hdr_end] = 0;
 
     int hv1, hv2;
-    if (sscanf(r.headers, "HTTP/%d.%d %d", &hv1, &hv2, &r.status) != 3)
-        die("bad HTTP status line: %.40s", r.headers);
+    if (sscanf(r.headers, "HTTP/%d.%d %d", &hv1, &hv2, &r.status) != 3) {
+        fprintf(stderr, "http_recv: bad HTTP status line: %.40s\n", r.headers);
+        free(r.headers); r.headers = NULL; r.status = 0;
+        free(buf);
+        return r;   /* soft-fail */
+    }
 
     const char *cl = find_header(r.headers, "Content-Length");
     r.content_length = parse_long(cl);
@@ -372,58 +435,14 @@ static struct http_resp http_recv_response(libusb_device_handle *h,
     r.chunked = te && strncasecmp(te, "chunked", 7) == 0;
 
     long body_have = have - hdr_end;
-    if (r.content_length >= 0) {
-        have = read_n(h, iface->ep_in, &buf, &cap, have, hdr_end + r.content_length);
-        body_have = have - hdr_end;
-        r.body = malloc(body_have ? body_have : 1);
-        memcpy(r.body, buf + hdr_end, body_have);
-        r.body_len = body_have;
-    } else if (r.chunked) {
-        /* minimal chunked decoder */
-        uint8_t *out = NULL;
-        long out_len = 0, out_cap = 0;
-        long pos = hdr_end;
-        while (1) {
-            long line_end = -1;
-            while (line_end < 0) {
-                for (long i = pos; i + 1 < have; i++) {
-                    if (buf[i] == '\r' && buf[i+1] == '\n') { line_end = i; break; }
-                }
-                if (line_end >= 0) break;
-                int got = bulk_read_some(h, iface->ep_in, buf + have,
-                                         (int)(cap - have), BULK_TIMEOUT_MS);
-                if (got <= 0) die("EOF in chunked stream");
-                have += got;
-                if (cap - have < 4096) { cap *= 2; buf = realloc(buf, cap); }
-            }
-            char numbuf[32] = {0};
-            long nlen = line_end - pos;
-            if (nlen >= (long)sizeof(numbuf)) nlen = sizeof(numbuf) - 1;
-            memcpy(numbuf, buf + pos, nlen);
-            long chunk = strtol(numbuf, NULL, 16);
-            pos = line_end + 2;
-            if (chunk == 0) break;
-            have = read_n(h, iface->ep_in, &buf, &cap, have, pos + chunk + 2);
-            if (out_len + chunk > out_cap) {
-                out_cap = (out_len + chunk) * 2;
-                out = realloc(out, out_cap);
-            }
-            memcpy(out + out_len, buf + pos, chunk);
-            out_len += chunk;
-            pos += chunk + 2;
-        }
-        r.body = out;
-        r.body_len = out_len;
+    if (r.chunked) {
+        dechunk(buf + hdr_end, body_have, &r.body, &r.body_len);
+        if (!r.body) { r.body = malloc(1); r.body_len = 0; }
     } else {
-        /* read until short read / timeout */
-        while (1) {
-            if (cap - have < 4096) { cap *= 2; buf = realloc(buf, cap); }
-            int got = bulk_read_some(h, iface->ep_in, buf + have,
-                                     (int)(cap - have), 2000);
-            if (got <= 0) break;
-            have += got;
-        }
-        body_have = have - hdr_end;
+        /* Trust Content-Length only to trim a possible trailing extra read;
+         * otherwise hand back everything after the header terminator. */
+        if (r.content_length >= 0 && r.content_length < body_have)
+            body_have = r.content_length;
         r.body = malloc(body_have ? body_have : 1);
         memcpy(r.body, buf + hdr_end, body_have);
         r.body_len = body_have;
@@ -504,6 +523,7 @@ static int cmd_probe(libusb_device_handle *h, const struct ipp_iface *iface) {
 static int cmd_get(libusb_device_handle *h, const struct ipp_iface *iface,
                    const char *path) {
     struct http_resp r = http_round_trip(h, iface, "GET", path, NULL, NULL, 0);
+    if (!r.headers) { fprintf(stderr, "no/garbled HTTP response from device\n"); free_resp(&r); return 2; }
     fprintf(stderr, "<-- HTTP %d  (%ld bytes)\n", r.status, r.body_len);
     if (verbose || r.status / 100 == 3) fputs(r.headers, stderr);
     fwrite(r.body, 1, r.body_len, stdout);
@@ -538,6 +558,7 @@ static int cmd_scan(libusb_device_handle *h, const struct ipp_iface *iface,
     struct http_resp create = http_round_trip(h, iface,
         "POST", "/eSCL/ScanJobs", "application/xml; charset=UTF-8",
         job_xml, (long)(sizeof(job_xml) - 1));
+    if (!create.headers) { fprintf(stderr, "no/garbled HTTP response from device\n"); free_resp(&create); return 2; }
     fprintf(stderr, "<-- POST /eSCL/ScanJobs HTTP %d\n", create.status);
     if (verbose) fputs(create.headers, stderr);
     if (create.status != 201) {
@@ -562,6 +583,7 @@ static int cmd_scan(libusb_device_handle *h, const struct ipp_iface *iface,
     fprintf(stderr, "    job at %s\n", base);
 
     struct http_resp page = http_round_trip(h, iface, "GET", next_doc, NULL, NULL, 0);
+    if (!page.headers) { fprintf(stderr, "no/garbled HTTP response from device\n"); free_resp(&page); return 2; }
     fprintf(stderr, "<-- GET %s HTTP %d  (%ld bytes)\n",
             next_doc, page.status, page.body_len);
     if (verbose) fputs(page.headers, stderr);
@@ -1410,11 +1432,20 @@ static void *proxy_thread_main(void *arg) {
         free(body);
 
         int keep_alive = !m.conn_close && m.http_minor >= 1;
-        int wrc = proxy_write_response(fd, &r, m.http_minor, keep_alive);
-
-        if (verbose) {
-            fprintf(stderr, "[proxy %s] <- %d  hdr=%zu body=%ld\n",
-                    c->peer, r.status, strlen(r.headers), r.body_len);
+        int wrc;
+        if (!r.headers) {
+            /* Device gave no/garbled reply (the pipe was drained to idle, so
+             * it's already resynced for the next client). Report 502 and close
+             * this connection rather than crashing the whole proxy. */
+            keep_alive = 0;
+            wrc = proxy_send_simple(fd, m.http_minor, 502, "Bad Gateway");
+            if (verbose)
+                fprintf(stderr, "[proxy %s] <- 502 (no device response)\n", c->peer);
+        } else {
+            wrc = proxy_write_response(fd, &r, m.http_minor, keep_alive);
+            if (verbose)
+                fprintf(stderr, "[proxy %s] <- %d  hdr=%zu body=%ld\n",
+                        c->peer, r.status, strlen(r.headers), r.body_len);
         }
 
         free_resp(&r);
@@ -1448,6 +1479,10 @@ static int cmd_proxy(libusb_device_handle *h, const struct ipp_iface *iface, int
             port);
     fprintf(stderr, "  try:  curl -sS http://127.0.0.1:%d/eSCL/ScannerCapabilities | xmllint --format -\n",
             port);
+
+    /* Clear any bytes a previous (possibly aborted) session left queued on the
+     * device so the first request lands on a clean HTTP transaction boundary. */
+    usb_drain(h, iface);
 
     for (;;) {
         struct sockaddr_in peer;
