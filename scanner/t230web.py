@@ -465,23 +465,13 @@ PAGE = """<!doctype html>
     }
     #preview { max-height: 75vw; }
 
-    /* Settings collapse toggle */
-    #settingsDetails > summary {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 6px 0;
-      cursor: pointer;
-      color: var(--text-dim);
-      font-size: 11px; font-weight: 600;
-      text-transform: uppercase; letter-spacing: 0.5px;
-      list-style: none; -webkit-appearance: none;
-    }
-    #settingsDetails > summary::after { content: '▾'; }
-    #settingsDetails[open] > summary::after { content: '▴'; }
+    /* Hide settings on mobile — scan button is all that's needed */
+    #settingsDetails { display: none; }
+    aside:not(.history-panel) { padding: 10px 12px; }
 
-    /* Touch targets */
-    button { min-height: 44px; padding: 10px 16px; font-size: 14px; }
+    /* Big scan button */
+    #scanBtn { font-size: 15px; padding: 12px; }
+    button { min-height: 44px; font-size: 14px; }
     select { min-height: 36px; font-size: 14px; }
 
     /* History: horizontal scroll strip */
