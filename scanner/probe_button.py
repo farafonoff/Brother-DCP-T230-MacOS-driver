@@ -32,7 +32,6 @@ def find_device():
     dev = usb.core.find(idVendor=VENDOR, idProduct=PRODUCT)
     if dev is None:
         raise OSError(f"device {VENDOR:04x}:{PRODUCT:04x} not found")
-    dev.set_configuration()
     return dev
 
 
