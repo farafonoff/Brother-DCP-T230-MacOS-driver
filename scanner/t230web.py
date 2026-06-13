@@ -211,6 +211,7 @@ PAGE = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DCP-T230 Scan</title>
 <style>
   /* Photoshop-ish dark palette */
@@ -435,36 +436,72 @@ PAGE = """<!doctype html>
     opacity: 0.35;
   }
 
+  /* ── Settings collapse (desktop: always open, hide toggle) ── */
+  @media (min-width: 769px) {
+    #settingsDetails > :not(summary) { display: block !important; }
+    #settingsDetails > summary { display: none; }
+  }
+
   /* ── Mobile layout ── */
   @media (max-width: 768px) {
-    main {
-      grid-template-columns: 1fr;
-    }
-    section.preview {
+    main { grid-template-columns: 1fr; }
+
+    /* Order: settings/action first, preview second, history last */
+    aside:not(.history-panel) {
       order: 1;
-      min-height: 56vw;
-      padding: 10px;
-    }
-    #preview { max-height: 75vw; }
-    aside {
-      order: 2;
       border-right: none;
       border-bottom: 1px solid var(--border);
       overflow-y: visible;
+    }
+    section.preview {
+      order: 2;
+      min-height: 56vw;
+      padding: 10px;
     }
     aside.history-panel {
       order: 3;
       border-left: none;
       border-top: 1px solid var(--border);
     }
-    button {
-      min-height: 44px;
-      padding: 10px 16px;
-      font-size: 14px;
+    #preview { max-height: 75vw; }
+
+    /* Settings collapse toggle */
+    #settingsDetails > summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 0;
+      cursor: pointer;
+      color: var(--text-dim);
+      font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.5px;
+      list-style: none; -webkit-appearance: none;
     }
+    #settingsDetails > summary::after { content: '▾'; }
+    #settingsDetails[open] > summary::after { content: '▴'; }
+
+    /* Touch targets */
+    button { min-height: 44px; padding: 10px 16px; font-size: 14px; }
     select { min-height: 36px; font-size: 14px; }
-    .history-card { padding: 10px; }
-    .history-card img { width: 72px; height: 72px; }
+
+    /* History: horizontal scroll strip */
+    .history-list {
+      flex-direction: row;
+      overflow-x: auto; overflow-y: hidden;
+      padding-bottom: 6px;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+    }
+    .history-card {
+      flex-direction: column;
+      flex-shrink: 0;
+      width: 96px;
+      padding: 6px;
+    }
+    .history-card img { width: 100%; height: 72px; }
+    .history-card-meta { font-size: 10px; }
+    .history-card-dl { display: block; text-align: center; margin-top: 4px; }
+
     footer { flex-direction: column; gap: 2px; font-size: 11px; }
   }
 </style>
@@ -478,25 +515,28 @@ PAGE = """<!doctype html>
 <main>
   <!-- ── Left column: controls ── -->
   <aside>
-    <div class="group">
-      <h2>Resolution</h2>
-      <select id="dpi">
-        <option value="100">100 DPI (draft)</option>
-        <option value="200">200 DPI</option>
-        <option value="300" selected>300 DPI</option>
-        <option value="400">400 DPI</option>
-        <option value="600">600 DPI</option>
-        <option value="1200">1200 DPI (slow)</option>
-      </select>
-    </div>
+    <details id="settingsDetails">
+      <summary>Settings</summary>
+      <div class="group">
+        <h2>Resolution</h2>
+        <select id="dpi">
+          <option value="100">100 DPI (draft)</option>
+          <option value="200">200 DPI</option>
+          <option value="300" selected>300 DPI</option>
+          <option value="400">400 DPI</option>
+          <option value="600">600 DPI</option>
+          <option value="1200">1200 DPI (slow)</option>
+        </select>
+      </div>
 
-    <div class="group">
-      <h2>Mode</h2>
-      <select id="mode">
-        <option value="C24BIT" selected>Color (24-bit RGB)</option>
-        <option value="GRAY256">Grayscale (8-bit)</option>
-      </select>
-    </div>
+      <div class="group">
+        <h2>Mode</h2>
+        <select id="mode">
+          <option value="C24BIT" selected>Color (24-bit RGB)</option>
+          <option value="GRAY256">Grayscale (8-bit)</option>
+        </select>
+      </div>
+    </details>
 
     <div class="group">
       <h2>Action</h2>
