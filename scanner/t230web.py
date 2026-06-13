@@ -436,10 +436,9 @@ PAGE = """<!doctype html>
     opacity: 0.35;
   }
 
-  /* ── Settings collapse (desktop: always open, hide toggle) ── */
-  @media (min-width: 769px) {
-    #settingsDetails > :not(summary) { display: block !important; }
-    #settingsDetails > summary { display: none; }
+  /* Settings panel: visible on desktop, hidden on mobile */
+  @media (max-width: 768px) {
+    #settingsPanel { display: none; }
   }
 
   /* ── Mobile layout ── */
@@ -465,8 +464,6 @@ PAGE = """<!doctype html>
     }
     #preview { max-height: 75vw; }
 
-    /* Hide settings on mobile — scan button is all that's needed */
-    #settingsDetails { display: none; }
     aside:not(.history-panel) { padding: 10px 12px; }
 
     /* Big scan button */
@@ -505,8 +502,7 @@ PAGE = """<!doctype html>
 <main>
   <!-- ── Left column: controls ── -->
   <aside>
-    <details id="settingsDetails">
-      <summary>Settings</summary>
+    <div id="settingsPanel">
       <div class="group">
         <h2>Resolution</h2>
         <select id="dpi">
@@ -526,7 +522,7 @@ PAGE = """<!doctype html>
           <option value="GRAY256">Grayscale (8-bit)</option>
         </select>
       </div>
-    </details>
+    </div>
 
     <div class="group">
       <h2>Action</h2>
