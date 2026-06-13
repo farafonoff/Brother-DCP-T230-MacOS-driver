@@ -790,10 +790,20 @@ async function pollScanStatus() {
     } else if (!isScanning && wasButtonScanning) {
       // Just finished.
       wasButtonScanning = false;
+      lastHistoryKey = '';
+      // Load history and show the newest scan in the preview.
+      try {
+        const r = await fetch('/history');
+        if (r.ok) {
+          const items = await r.json();
+          const key = items.map(i => i.filename).join(',');
+          lastHistoryKey = key;
+          renderHistory(items);
+          if (items.length > 0) showHistoryItem(items[0]);
+        }
+      } catch (e) {}
       setBodyState('done');
       setStatus('Scan complete — saved to ~/Pictures/T230/');
-      lastHistoryKey = '';
-      loadHistory();
     }
   } catch (e) {
     // Network error — ignore.
