@@ -61,9 +61,9 @@ def main():
 
     while True:
         try:
-            # Open fresh each poll — mirrors brscan-skey behaviour,
-            # prevents device going silent after a few queries.
-            dev = find_device()
+            if dev is None:
+                dev = find_device()
+
             result = check_button(dev)
 
             if result and result["event"] != last_event:
@@ -74,21 +74,16 @@ def main():
                     print(f"  -> {result['label']}  fn={result['func_label']}"
                           f"  (raw: {result['raw']})")
 
-        except OSError as e:
-            if last_event != "error":
-                print(f"  WARNING: {e} - retrying...")
-                last_event = "error"
-        except usb.core.USBError as e:
-            if last_event != "error":
-                print(f"  WARNING: USB error: {e} - retrying...")
-                last_event = "error"
-        finally:
+        except (OSError, usb.core.USBError) as e:
+            print(f"  WARNING: {e} - reconnecting...")
             if dev is not None:
                 try:
                     usb.util.dispose_resources(dev)
                 except Exception:
                     pass
                 dev = None
+            last_event = None
+            time.sleep(1.0)
 
         time.sleep(POLL_S)
 
