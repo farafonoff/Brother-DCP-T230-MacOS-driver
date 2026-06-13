@@ -7,7 +7,7 @@
 # Must be run as root: sudo ./install-linux.sh
 #
 # Requirements (auto-checked below):
-#   sudo apt install cups python3 python3-usb cups-filters avahi-daemon
+#   sudo apt install cups python3 python3-usb cups-filters ghostscript avahi-daemon
 
 set -euo pipefail
 
@@ -35,6 +35,7 @@ die() { printf '[install] ERROR: %s\n' "$*" >&2; exit 1; }
 missing_pkgs=()
 command -v cupsd   >/dev/null 2>&1 || missing_pkgs+=(cups)
 command -v python3 >/dev/null 2>&1 || missing_pkgs+=(python3)
+command -v gs      >/dev/null 2>&1 || missing_pkgs+=(ghostscript)
 # CUPS filters live in /usr/lib/cups/filter/, not on $PATH
 [[ -x /usr/lib/cups/filter/pdftoraster ]] || missing_pkgs+=(cups-filters)
 

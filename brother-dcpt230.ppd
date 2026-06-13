@@ -39,12 +39,10 @@
 *% Direct PWG Raster path (used by macOS with this PPD installed locally).
 *cupsFilter: "image/pwg-raster 0 brother_dcpt230_pjl"
 
-*% Linux conversion path: PDF → PWG Raster → brother_dcpt230_pjl.
-*% Requires cups-filters (pdftoraster, uses poppler — no ghostscript needed).
-*% macOS CUPS ignores this if pdftoraster is absent (uses its own pipeline).
-*% Advertising PDF support causes IPP clients (macOS, iOS, Android) to send
-*% PDF directly, avoiding any PostScript/ghostscript path on the server.
+*% Linux conversion paths: PDF preferred (poppler, fast), PostScript fallback (ghostscript, slow).
+*% Lower cost = higher preference; clients that support PDF will use it.
 *cupsFilter2: "application/pdf image/pwg-raster 100 pdftoraster"
+*cupsFilter2: "application/postscript image/pwg-raster 150 gstoraster"
 
 *% Raster format hints: tell cgpdftoraster / rastertopwg what to produce.
 *% The DCP-T230 wants 8-bit-per-color sRGB (colorspace 19) for colour, or
