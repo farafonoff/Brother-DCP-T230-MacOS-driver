@@ -1,16 +1,21 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["libusb1>=3.0"]
+# dependencies = ["libusb1>=3.0", "Pillow>=9.0"]
 # ///
 """
 Tiny web UI for the Brother DCP-T230 native Python driver.
 
-Serves a single HTML page on http://127.0.0.1:8080/. The Scan button
-kicks off a real scan that streams progressively into the page's <img>
-element (browser renders the baseline JPEG as bytes arrive — no
-WebSocket, no client-side decoder), tees a copy to disk, and offers a
-Download link once complete.
+Serves a single HTML page on http://0.0.0.0:8080/ (default; set T230_HOST
+and T230_PORT to override).  Features:
+  - Scan button: streams a live progressive JPEG into the centre preview.
+  - Cancel button: aborts an in-progress scan.
+  - Download link for the current scan session.
+  - Auto-save every scan to ~/Pictures/T230/.
+  - Scan History panel (right column): thumbnails of past scans, click to
+    preview, metadata, and download link.
+  - Hardware scan-button support: pressing the physical button on the printer
+    triggers a 300-DPI colour scan, which appears in the history panel.
 
 Run:
     uv run t230web.py
@@ -20,26 +25,38 @@ or:
 
 from __future__ import annotations
 
+import io
+import json
 import os
+import re
 import sys
 import time
 import uuid
+import shutil
 import threading
-import urllib.parse
 import datetime
 import pathlib
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-# Driver lives next to this file.
+# Driver and button listener live next to this file.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from t230scan import T230, ScanError, DeviceNotFound, Cancelled, ProtocolError
+from button import ButtonListener
 
-PORT = int(os.environ.get("T230_PORT", "8080"))
-TMP_DIR = pathlib.Path("/tmp/t230")
+# ── Configuration ────────────────────────────────────────────────────────────
+
+PORT      = int(os.environ.get("T230_PORT", "8080"))
+HOST      = os.environ.get("T230_HOST", "0.0.0.0")
+TMP_DIR   = pathlib.Path("/tmp/t230")
 TMP_DIR.mkdir(exist_ok=True)
 PICTURES_DIR = pathlib.Path.home() / "Pictures" / "T230"
 PICTURES_DIR.mkdir(parents=True, exist_ok=True)
+THUMB_DIR = PICTURES_DIR / ".thumbs"
+THUMB_DIR.mkdir(parents=True, exist_ok=True)
 TMP_TTL_SECONDS = 3600
+
+# ── Global scan state ────────────────────────────────────────────────────────
 
 # Only one scan at a time (USB claim is exclusive).
 scan_lock = threading.Lock()
@@ -47,8 +64,148 @@ scan_lock = threading.Lock()
 cancel_events: dict[str, threading.Event] = {}
 cancel_events_lock = threading.Lock()
 
+# Button-triggered scan status (no scan_id since it's not streamed to a client).
+_scanning = False
+_scanning_lock = threading.Lock()
 
-# ---------- HTML page ----------
+# ── Thumbnail helper ─────────────────────────────────────────────────────────
+
+def _make_thumbnail(src: pathlib.Path, dst: pathlib.Path) -> None:
+    """Resize *src* to a max-280px JPEG thumbnail and write to *dst*.
+    Falls back to a plain copy if Pillow is unavailable."""
+    try:
+        from PIL import Image
+        with Image.open(src) as im:
+            im.thumbnail((280, 280))
+            im.save(dst, format="JPEG", quality=75)
+    except ImportError:
+        shutil.copy2(src, dst)
+    except Exception as e:
+        sys.stderr.write(f"[thumb] {src.name}: {e}\n")
+        try:
+            shutil.copy2(src, dst)
+        except Exception:
+            pass
+
+# ── Filename parsing ──────────────────────────────────────────────────────────
+
+_SCAN_RE = re.compile(
+    r"^scan-(\d{4}-\d{2}-\d{2}-\d{6})-(\d+)dpi-([a-z0-9]+)\.jpg$",
+    re.IGNORECASE,
+)
+
+def _parse_scan_filename(name: str) -> dict | None:
+    """Parse ``scan-YYYY-MM-DD-HHMMSS-{dpi}dpi-{mode}.jpg``.
+
+    Returns a dict with keys ``dt``, ``dpi``, ``mode``, ``filename``, or
+    *None* if the name doesn't match."""
+    m = _SCAN_RE.match(name)
+    if not m:
+        return None
+    try:
+        dt = datetime.datetime.strptime(m.group(1), "%Y-%m-%d-%H%M%S")
+    except ValueError:
+        return None
+    return {
+        "filename": name,
+        "dt":       dt.isoformat(sep=" "),
+        "dpi":      int(m.group(2)),
+        "mode":     m.group(3).upper(),
+    }
+
+# ── History ───────────────────────────────────────────────────────────────────
+
+def _list_history() -> list[dict]:
+    """Return the 100 most-recent scans from PICTURES_DIR as a list of dicts.
+
+    Each dict has: filename, thumb (URL), url, dt, dpi, mode, size (bytes).
+    Sorted newest-first."""
+    items = []
+    for p in PICTURES_DIR.glob("*.jpg"):
+        parsed = _parse_scan_filename(p.name)
+        if parsed is None:
+            continue
+        try:
+            size = p.stat().st_size
+        except OSError:
+            size = 0
+        parsed["size"] = size
+        parsed["url"]  = f"/history/file/{urllib.parse.quote(p.name)}"
+        parsed["thumb"] = f"/history/thumb/{urllib.parse.quote(p.name)}"
+        items.append(parsed)
+    items.sort(key=lambda x: x["dt"], reverse=True)
+    return items[:100]
+
+# ── Background scan (button-triggered) ───────────────────────────────────────
+
+def scan_background(dpi: int = 300, mode: str = "C24BIT") -> None:
+    """Run a full scan in the background (used by the hardware button).
+
+    Non-blocking on scan_lock — logs and returns immediately if another scan
+    is in progress.  Sets the global ``_scanning`` flag for the /scan/status
+    endpoint while active."""
+    global _scanning
+
+    if not scan_lock.acquire(blocking=False):
+        sys.stderr.write("[button-scan] another scan in progress — skipping\n")
+        return
+
+    with _scanning_lock:
+        _scanning = True
+
+    pic_path = pictures_path(dpi, mode)
+    sys.stderr.write(f"[button-scan] starting {dpi} DPI {mode} → {pic_path}\n")
+    try:
+        with T230() as scanner, open(pic_path, "wb") as f:
+            for band in scanner.scan(dpi, mode):
+                f.write(band)
+        sys.stderr.write(f"[button-scan] saved {pic_path}\n")
+        # Generate thumbnail.
+        thumb_path = THUMB_DIR / pic_path.name
+        _make_thumbnail(pic_path, thumb_path)
+    except DeviceNotFound as e:
+        sys.stderr.write(f"[button-scan] device not found: {e}\n")
+    except (ScanError, ProtocolError, Exception) as e:
+        sys.stderr.write(f"[button-scan] {type(e).__name__}: {e}\n")
+    finally:
+        with _scanning_lock:
+            _scanning = False
+        scan_lock.release()
+
+# ── Misc helpers ──────────────────────────────────────────────────────────────
+
+def cleanup_tmp() -> None:
+    """Drop /tmp/t230/*.jpg older than TMP_TTL_SECONDS."""
+    now = time.time()
+    for p in TMP_DIR.iterdir():
+        try:
+            if now - p.stat().st_mtime > TMP_TTL_SECONDS:
+                p.unlink()
+        except OSError:
+            pass
+
+
+def pictures_path(dpi: int, mode: str) -> pathlib.Path:
+    ts = datetime.datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    return PICTURES_DIR / f"scan-{ts}-{dpi}dpi-{mode.lower()}.jpg"
+
+
+def parse_int_list(q: dict[str, list[str]], key: str, allowed: set[int],
+                   default: int) -> int | None:
+    raw = q.get(key, [str(default)])[0]
+    try:
+        v = int(raw)
+    except ValueError:
+        return None
+    return v if v in allowed else None
+
+
+def _safe_filename(name: str) -> bool:
+    """Return True iff *name* is a plain filename with no path traversal."""
+    return bool(name) and name == pathlib.Path(name).name and ".." not in name
+
+
+# ── HTML page ─────────────────────────────────────────────────────────────────
 
 PAGE = """<!doctype html>
 <html lang="en">
@@ -71,7 +228,7 @@ PAGE = """<!doctype html>
     --success:   #5fa763;
     --shadow:    0 1px 0 #4a4a4a inset, 0 -1px 0 #1a1a1a inset;
   }
-  *  { box-sizing: border-box; }
+  * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
     font: 13px -apple-system, "SF Pro Text", system-ui, sans-serif;
@@ -97,18 +254,23 @@ PAGE = """<!doctype html>
   body.done     header .pulse { background: var(--success); }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-  /* Main two-column layout */
+  /* Main three-column layout */
   main {
-    display: grid; grid-template-columns: 280px 1fr; min-height: 0;
+    display: grid;
+    grid-template-columns: 240px 1fr 240px;
+    min-height: 0;
   }
   aside {
     background: var(--panel);
     border-right: 1px solid var(--border);
     padding: 12px; overflow-y: auto;
   }
+  aside.history-panel {
+    border-right: none;
+    border-left: 1px solid var(--border);
+  }
   section.preview {
     background: #1a1a1a;
-    /* checkerboard for empty preview */
     background-image:
       linear-gradient(45deg, #232323 25%, transparent 25%),
       linear-gradient(-45deg, #232323 25%, transparent 25%),
@@ -121,15 +283,11 @@ PAGE = """<!doctype html>
     padding: 16px;
   }
   #preview {
-    /* Always fit within the preview pane — both dimensions, preserving
-     * aspect ratio. min-height: 0 on the flex container is what lets
-     * max-height: 100% actually take effect. */
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
     box-shadow: 0 4px 16px rgba(0,0,0,0.6);
     background: #fff;
-    /* tiny perceived border, helps separate light pages from background */
     outline: 1px solid #555;
   }
   #preview:not([src]) { display: none; }
@@ -181,9 +339,7 @@ PAGE = """<!doctype html>
     cursor: pointer; padding: 6px 14px; font-size: 12px;
     transition: background 0.1s;
   }
-  button:hover:not(:disabled) {
-    background: linear-gradient(#454545, #383838);
-  }
+  button:hover:not(:disabled) { background: linear-gradient(#454545, #383838); }
   button:active:not(:disabled) {
     background: linear-gradient(#2a2a2a, #353535);
     box-shadow: 0 1px 2px #000 inset;
@@ -221,6 +377,63 @@ PAGE = """<!doctype html>
     background: #1a1a1a; padding: 1px 4px; border-radius: 2px;
     color: #b0c0d0; font-size: 10.5px;
   }
+
+  /* ── History panel ── */
+  .history-list {
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .history-empty {
+    color: var(--text-dim); font-size: 12px;
+    padding: 8px 0; text-align: center;
+  }
+  .history-card {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 6px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .history-card:hover { border-color: var(--border-2); }
+  .history-card.active { border-color: var(--accent); }
+  .history-card img {
+    width: 56px; height: 56px;
+    object-fit: cover;
+    border-radius: 2px;
+    background: #1a1a1a;
+    flex-shrink: 0;
+  }
+  .history-card-meta {
+    flex: 1; min-width: 0;
+    font-size: 11px; line-height: 1.55;
+    color: var(--text-dim);
+    overflow: hidden;
+  }
+  .history-card-meta .hdate {
+    color: var(--text); font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .history-card-meta .hinfo {
+    color: var(--text-dim);
+  }
+  .history-card-dl {
+    flex-shrink: 0;
+    font-size: 11px; color: #b0e0b3; text-decoration: none;
+    padding: 2px 6px;
+    background: linear-gradient(#384a38, #2c3a2c);
+    border: 1px solid var(--border); border-radius: 2px;
+  }
+  .history-card-dl:hover { background: linear-gradient(#445544, #384a38); }
+
+  /* Lock all interactive controls while a scan is in progress */
+  body.scanning select,
+  body.scanning .history-card,
+  body.scanning .history-card-dl,
+  body.scanning a.dl {
+    pointer-events: none;
+    opacity: 0.35;
+  }
 </style>
 </head>
 <body>
@@ -230,6 +443,7 @@ PAGE = """<!doctype html>
 </header>
 
 <main>
+  <!-- ── Left column: controls ── -->
   <aside>
     <div class="group">
       <h2>Resolution</h2>
@@ -266,10 +480,21 @@ PAGE = """<!doctype html>
     </div>
   </aside>
 
+  <!-- ── Centre column: preview ── -->
   <section class="preview">
     <img id="preview" alt="scanned image">
     <div class="empty-hint">No image. Press <strong>Scan</strong> to start.</div>
   </section>
+
+  <!-- ── Right column: history ── -->
+  <aside class="history-panel">
+    <div class="group">
+      <h2>Scan History</h2>
+      <div class="history-list" id="historyList">
+        <div class="history-empty">No scans yet</div>
+      </div>
+    </div>
+  </aside>
 </main>
 
 <footer>
@@ -285,10 +510,15 @@ const dlBox     = document.getElementById('dlBox');
 const img       = document.getElementById('preview');
 const status    = document.getElementById('status');
 const meta      = document.getElementById('meta');
+const histList  = document.getElementById('historyList');
 
-let currentScanId = null;
-let timer = null;
-let bytesAtLast = 0;
+let currentScanId    = null;   // active HTTP-streaming scan
+let timer            = null;
+let selectedFilename = null;   // highlighted history card
+let lastHistoryDt    = null;   // newest dt seen, for refresh detection
+let wasButtonScanning = false; // tracks /scan/status transitions
+
+// ── Utility ──────────────────────────────────────────────────────────────────
 
 function setBodyState(s) {
   document.body.classList.remove('scanning', 'error', 'done');
@@ -306,12 +536,20 @@ function startTimer(label) {
 }
 function stopTimer() { if (timer) { clearInterval(timer); timer = null; } }
 
+function fmtSize(bytes) {
+  if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+  if (bytes >= 1024)    return (bytes / 1024).toFixed(0) + ' KB';
+  return bytes + ' B';
+}
+
+// ── Manual scan (Scan button) ─────────────────────────────────────────────
+
 scanBtn.addEventListener('click', () => {
-  const dpi = document.getElementById('dpi').value;
-  const mode = document.getElementById('mode').value;
+  const dpi      = document.getElementById('dpi').value;
+  const mode     = document.getElementById('mode').value;
   const modeLabel = mode === 'C24BIT' ? 'Color' : 'Grayscale';
-  currentScanId = crypto.randomUUID();
-  scanBtn.disabled = true;
+  currentScanId  = crypto.randomUUID();
+  scanBtn.disabled  = true;
   cancelBtn.disabled = false;
   dlBox.style.display = 'none';
   img.removeAttribute('src');
@@ -324,19 +562,21 @@ scanBtn.addEventListener('click', () => {
 img.addEventListener('load', () => {
   stopTimer();
   cancelBtn.disabled = true;
-  scanBtn.disabled = false;
+  scanBtn.disabled   = false;
   setBodyState('done');
   if (currentScanId) {
     dl.href = `/scan/file/${currentScanId}`;
     dlBox.style.display = '';
     setStatus(`Done · ${img.naturalWidth}×${img.naturalHeight} px · saved to ~/Pictures/T230/`);
   }
+  // Refresh history so the new scan appears immediately.
+  setTimeout(loadHistory, 800);
 });
 
 img.addEventListener('error', () => {
   stopTimer();
   cancelBtn.disabled = true;
-  scanBtn.disabled = false;
+  scanBtn.disabled   = false;
   setBodyState('error');
   if (img.getAttribute('src')) setStatus('Scan failed');
   else setStatus('Cancelled');
@@ -353,53 +593,135 @@ cancelBtn.addEventListener('click', async () => {
   setBodyState('error');
   setStatus('Cancelled — device cleaning up (next scan may take a few s longer)');
 });
+
+// ── History ──────────────────────────────────────────────────────────────────
+
+async function loadHistory() {
+  try {
+    const r = await fetch('/history');
+    if (!r.ok) return;
+    const items = await r.json();
+    renderHistory(items);
+  } catch (e) {
+    // Silently ignore network errors — history is best-effort.
+  }
+}
+
+function renderHistory(items) {
+  if (!items || items.length === 0) {
+    histList.innerHTML = '<div class="history-empty">No scans yet</div>';
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  for (const item of items) {
+    const card = document.createElement('div');
+    card.className = 'history-card' + (item.filename === selectedFilename ? ' active' : '');
+    card.dataset.filename = item.filename;
+
+    // Thumbnail
+    const thumb = document.createElement('img');
+    thumb.src = item.thumb;
+    thumb.alt = '';
+    thumb.loading = 'lazy';
+    card.appendChild(thumb);
+
+    // Meta text
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'history-card-meta';
+    // Date — strip seconds for brevity
+    const shortDt = item.dt.replace(/:\d\d$/, '');
+    const modeLabel = item.mode === 'C24BIT' ? 'Color' : item.mode === 'GRAY256' ? 'Gray' : item.mode;
+    metaDiv.innerHTML =
+      `<div class="hdate">${shortDt}</div>` +
+      `<div class="hinfo">${item.dpi} DPI · ${modeLabel} · ${fmtSize(item.size)}</div>`;
+    card.appendChild(metaDiv);
+
+    // Download link
+    const a = document.createElement('a');
+    a.className = 'history-card-dl';
+    a.href = item.url;
+    a.download = item.filename;
+    a.textContent = 'DL';
+    a.addEventListener('click', e => e.stopPropagation());
+    card.appendChild(a);
+
+    card.addEventListener('click', () => showHistoryItem(item));
+    frag.appendChild(card);
+  }
+  histList.innerHTML = '';
+  histList.appendChild(frag);
+}
+
+function showHistoryItem(item) {
+  selectedFilename = item.filename;
+  // Update active styling.
+  document.querySelectorAll('.history-card').forEach(c => {
+    c.classList.toggle('active', c.dataset.filename === item.filename);
+  });
+  // Show in preview.
+  currentScanId = null;
+  img.src = item.url;
+  const modeLabel = item.mode === 'C24BIT' ? 'Color' : item.mode === 'GRAY256' ? 'Grayscale' : item.mode;
+  setMeta(`${item.dpi} DPI · ${modeLabel} · ${fmtSize(item.size)}`);
+  setStatus(item.dt);
+  setBodyState('done');
+  // Show a download link in the left panel too.
+  dl.href = item.url;
+  dl.download = item.filename;
+  dlBox.style.display = '';
+}
+
+// ── Button-scan status polling ────────────────────────────────────────────────
+
+async function pollScanStatus() {
+  try {
+    const r = await fetch('/scan/status');
+    if (!r.ok) return;
+    const data = await r.json();
+    const isScanning = data.scanning;
+
+    if (isScanning && !currentScanId) {
+      // Button-triggered scan in progress.
+      if (!wasButtonScanning) {
+        setBodyState('scanning');
+        setStatus('Scanning from button…');
+        setMeta('300 DPI · Color');
+      }
+      wasButtonScanning = true;
+    } else if (!isScanning && wasButtonScanning) {
+      // Just finished.
+      wasButtonScanning = false;
+      setBodyState('done');
+      setStatus('Scan complete — saved to ~/Pictures/T230/');
+      loadHistory();
+    }
+  } catch (e) {
+    // Network error — ignore.
+  }
+}
+
+// ── Startup & polling intervals ───────────────────────────────────────────────
+
+loadHistory();
+setInterval(loadHistory,      3000);
+setInterval(pollScanStatus,   1000);
 </script>
 </body>
 </html>
 """
 
 
-# ---------- helpers ----------
-
-def cleanup_tmp() -> None:
-    """Drop /tmp/t230/*.jpg older than TMP_TTL_SECONDS. Called on each
-    new scan; no scheduler needed."""
-    now = time.time()
-    for p in TMP_DIR.iterdir():
-        try:
-            if now - p.stat().st_mtime > TMP_TTL_SECONDS:
-                p.unlink()
-        except OSError:
-            pass
-
-
-def pictures_path(dpi: int, mode: str) -> pathlib.Path:
-    ts = datetime.datetime.now().strftime("%Y-%m-%d-%H%M%S")
-    return PICTURES_DIR / f"scan-{ts}-{dpi}dpi-{mode.lower()}.jpg"
-
-
-def parse_int_list(q: dict[str, list[str]], key: str, allowed: set[int],
-                   default: int) -> int | None:
-    raw = q.get(key, [str(default)])[0]
-    try:
-        v = int(raw)
-    except ValueError:
-        return None
-    return v if v in allowed else None
-
-
-# ---------- HTTP handler ----------
+# ── HTTP handler ──────────────────────────────────────────────────────────────
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
-    # quieten the default access log a bit
     def log_message(self, fmt, *args):
         sys.stderr.write(
             f"{self.log_date_time_string()} {self.address_string()} "
             f"{fmt % args}\n")
 
-    # -- send helpers --
+    # ── send helpers ──
 
     def _send_simple(self, code: int, body: bytes, ctype: str,
                      extra: dict[str, str] | None = None) -> None:
@@ -414,20 +736,63 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
-    # -- routing --
+    def _send_json(self, obj) -> None:
+        body = json.dumps(obj).encode("utf-8")
+        self._send_simple(200, body, "application/json")
+
+    def _send_file(self, path: pathlib.Path, inline: bool = True) -> None:
+        """Stream *path* to the client as image/jpeg."""
+        if not path.is_file():
+            self._send_simple(404, b"not found", "text/plain")
+            return
+        try:
+            data = path.read_bytes()
+        except OSError as e:
+            self._send_simple(500, f"read error: {e}".encode(), "text/plain")
+            return
+        extra: dict[str, str] = {}
+        if not inline:
+            ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            extra["Content-Disposition"] = f'attachment; filename="scan-{ts}.jpg"'
+        self._send_simple(200, data, "image/jpeg", extra)
+
+    # ── routing ──
 
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
-        if u.path == "/" or u.path == "":
+        p = u.path
+
+        if p in ("/", ""):
             self._send_simple(200, PAGE.encode("utf-8"),
                               "text/html; charset=utf-8")
             return
-        if u.path == "/scan/start":
+
+        if p == "/scan/start":
             self._serve_scan(u)
             return
-        if u.path.startswith("/scan/file/"):
-            self._serve_saved(u.path[len("/scan/file/"):])
+
+        if p.startswith("/scan/file/"):
+            self._serve_saved(p[len("/scan/file/"):])
             return
+
+        if p == "/scan/status":
+            with _scanning_lock:
+                scanning = _scanning
+            self._send_json({"scanning": scanning})
+            return
+
+        if p == "/history":
+            self._send_json(_list_history())
+            return
+
+        if p.startswith("/history/thumb/"):
+            self._serve_thumb(urllib.parse.unquote(p[len("/history/thumb/"):]))
+            return
+
+        if p.startswith("/history/file/"):
+            self._serve_history_file(urllib.parse.unquote(p[len("/history/file/"):]))
+            return
+
         self._send_simple(404, b"not found", "text/plain")
 
     def do_POST(self):
@@ -444,7 +809,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_simple(404, b"not found", "text/plain")
 
-    # -- /scan/start (chunked streaming + tee to disk) --
+    # ── /scan/start — chunked streaming + tee to disk ──
 
     def _serve_scan(self, u):
         q = urllib.parse.parse_qs(u.query)
@@ -458,8 +823,6 @@ class Handler(BaseHTTPRequestHandler):
             self._send_simple(400, b"bad mode (use C24BIT or GRAY256)",
                               "text/plain"); return
         scan_id = q.get("id", [str(uuid.uuid4())])[0]
-        # Defensive: only accept hex/uuid-shaped ids so we can use them as
-        # filenames safely.
         if not all(c.isalnum() or c == "-" for c in scan_id) or len(scan_id) > 64:
             self._send_simple(400, b"bad id", "text/plain"); return
 
@@ -475,7 +838,6 @@ class Handler(BaseHTTPRequestHandler):
         tmp_path = TMP_DIR / f"{scan_id}.jpg"
         pic_path = pictures_path(dpi, mode)
 
-        # Headers — chunked transfer encoding so we can flush each band.
         self.send_response(200)
         self.send_header("Content-Type", "image/jpeg")
         self.send_header("Transfer-Encoding", "chunked")
@@ -506,6 +868,11 @@ class Handler(BaseHTTPRequestHandler):
                         self.wfile.flush()
                     except (BrokenPipeError, ConnectionResetError, OSError):
                         client_alive = False
+            # Generate thumbnail in background so we don't hold up the response.
+            thumb_path = THUMB_DIR / pic_path.name
+            threading.Thread(
+                target=_make_thumbnail, args=(pic_path, thumb_path),
+                daemon=True).start()
             sys.stderr.write(f"[scan] id={scan_id} dpi={dpi} mode={mode} "
                              f"tmp={tmp_path} pic={pic_path}\n")
         except Cancelled:
@@ -519,7 +886,7 @@ class Handler(BaseHTTPRequestHandler):
                 cancel_events.pop(scan_id, None)
             scan_lock.release()
 
-    # -- /scan/file/<id> --
+    # ── /scan/file/<id> — download from /tmp ──
 
     def _serve_saved(self, scan_id: str):
         if not all(c.isalnum() or c == "-" for c in scan_id) or len(scan_id) > 64:
@@ -529,25 +896,54 @@ class Handler(BaseHTTPRequestHandler):
             self._send_simple(404, b"not found (or expired)", "text/plain")
             return
         try:
-            with open(path, "rb") as f:
-                body = f.read()
+            data = path.read_bytes()
         except OSError as e:
             self._send_simple(500, f"read error: {e}".encode(), "text/plain")
             return
         ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         self._send_simple(
-            200, body, "image/jpeg",
+            200, data, "image/jpeg",
             {"Content-Disposition": f'attachment; filename="scan-{ts}.jpg"'})
 
+    # ── /history/thumb/<filename> ──
 
-# ---------- main ----------
+    def _serve_thumb(self, filename: str):
+        if not _safe_filename(filename):
+            self._send_simple(400, b"bad filename", "text/plain"); return
+        src = PICTURES_DIR / filename
+        if not src.is_file():
+            self._send_simple(404, b"not found", "text/plain"); return
+        dst = THUMB_DIR / filename
+        if not dst.is_file():
+            _make_thumbnail(src, dst)
+        self._send_file(dst, inline=True)
+
+    # ── /history/file/<filename> — serve original inline ──
+
+    def _serve_history_file(self, filename: str):
+        if not _safe_filename(filename):
+            self._send_simple(400, b"bad filename", "text/plain"); return
+        self._send_file(PICTURES_DIR / filename, inline=True)
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> int:
-    srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
-    print(f"t230web listening on http://127.0.0.1:{PORT}/  (Ctrl-C to quit)",
+    # Start the hardware button listener.
+    listener = ButtonListener(
+        on_press=lambda: threading.Thread(
+            target=scan_background, daemon=True).start()
+    )
+    listener.start()
+
+    srv = ThreadingHTTPServer((HOST, PORT), Handler)
+    print(f"t230web listening on http://{HOST}:{PORT}/  (Ctrl-C to quit)",
           file=sys.stderr)
+    print(f"  bind host:            {HOST}", file=sys.stderr)
+    print(f"  port:                 {PORT}", file=sys.stderr)
     print(f"  /tmp/t230 buffer dir: {TMP_DIR}", file=sys.stderr)
     print(f"  auto-save dir:        {PICTURES_DIR}", file=sys.stderr)
+    print(f"  thumbnails dir:       {THUMB_DIR}", file=sys.stderr)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
