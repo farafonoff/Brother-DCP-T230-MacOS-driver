@@ -26,6 +26,8 @@ log "test input: $DIR/test.ps"
 # --- Step 1: gstoraster (PostScript -> raster) --------------------------------
 log "running gstoraster..."
 PPD="$PPD" \
+  CONTENT_TYPE=application/postscript \
+  FINAL_CONTENT_TYPE=image/pwg-raster \
   "$FILTER_DIR/gstoraster" 1 root "test" 1 "media=A4" "$DIR/test.ps" \
   > "$DIR/test.ras" 2>"$DIR/gs.log"
 GS_EXIT=$?
