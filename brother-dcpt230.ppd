@@ -48,7 +48,7 @@
 *% Raster format hints: tell cgpdftoraster / rastertopwg what to produce.
 *% The DCP-T230 wants 8-bit-per-color sRGB (colorspace 19) for colour, or
 *% 8-bit sGray (colorspace 18) for mono, at 300 DPI, uncompressed.
-*cupsRasterVersion: "3"
+*cupsRasterVersion: "2"
 *cupsBackSide: "Normal"
 
 *LanguageLevel: "3"
