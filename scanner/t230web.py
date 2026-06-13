@@ -434,6 +434,39 @@ PAGE = """<!doctype html>
     pointer-events: none;
     opacity: 0.35;
   }
+
+  /* ── Mobile layout ── */
+  @media (max-width: 768px) {
+    main {
+      grid-template-columns: 1fr;
+    }
+    section.preview {
+      order: 1;
+      min-height: 56vw;
+      padding: 10px;
+    }
+    #preview { max-height: 75vw; }
+    aside {
+      order: 2;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+      overflow-y: visible;
+    }
+    aside.history-panel {
+      order: 3;
+      border-left: none;
+      border-top: 1px solid var(--border);
+    }
+    button {
+      min-height: 44px;
+      padding: 10px 16px;
+      font-size: 14px;
+    }
+    select { min-height: 36px; font-size: 14px; }
+    .history-card { padding: 10px; }
+    .history-card img { width: 72px; height: 72px; }
+    footer { flex-direction: column; gap: 2px; font-size: 11px; }
+  }
 </style>
 </head>
 <body>
