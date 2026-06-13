@@ -98,7 +98,7 @@ if command -v lpinfo >/dev/null 2>&1; then
 fi
 
 if [[ -n "$PRINTER_URI" ]]; then
-    lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -P "$PPD_DEST"
+    lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -P "$PPD_DEST" -o media=A4
     lpadmin -p "$PRINTER_NAME" -o printer-is-shared=true || true
     cupsenable "$PRINTER_NAME" || true
     cupsaccept "$PRINTER_NAME" || true

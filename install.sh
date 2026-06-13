@@ -83,7 +83,7 @@ fi
 if [[ -n "$PRINTER_URI" ]]; then
     read -r -p "[install] Register CUPS queue '$PRINTER_NAME' using $PRINTER_URI? [y/N] " ans
     if [[ "${ans:-n}" =~ ^[Yy]$ ]]; then
-        lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -P "$PPD_DIR/$PPD_NAME"
+        lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -P "$PPD_DIR/$PPD_NAME" -o media=A4
         lpadmin -p "$PRINTER_NAME" -o printer-is-shared=false || true
         cupsenable "$PRINTER_NAME" || true
         cupsaccept "$PRINTER_NAME" || true
