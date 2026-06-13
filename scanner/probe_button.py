@@ -28,7 +28,8 @@ while True:
     for ep, iface in [(0x84, 1), (0x88, 2)]:
         try:
             data = dev.read(ep, 64, timeout=500)
-            print(f"EP {ep:#x} (iface {iface}): {bytes(data).hex()}  {bytes(data)!r}")
+            if data:
+                print(f"EP {ep:#x} (iface {iface}): {bytes(data).hex()}  {bytes(data)!r}")
         except usb.core.USBTimeoutError:
             pass
         except Exception as e:
