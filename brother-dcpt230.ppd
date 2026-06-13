@@ -41,9 +41,10 @@
 *% Output type application/vnd.cups-raw signals "send raw to the backend".
 *cupsFilter2: "image/pwg-raster application/vnd.cups-raw 0 brother_dcpt230_pjl"
 
-*% Conversion paths: PDF preferred (poppler, fast), PostScript fallback (ghostscript, slow).
-*cupsFilter2: "application/pdf image/pwg-raster 100 pdftoraster"
-*cupsFilter2: "application/postscript image/pwg-raster 150 gstoraster"
+*% Single-step wrappers: each converts directly to vnd.cups-raw so CUPS
+*% cannot insert a pwg-raster passthrough and bypass brother_dcpt230_pjl.
+*cupsFilter2: "application/pdf application/vnd.cups-raw 100 brother_dcpt230_pjl_pdf"
+*cupsFilter2: "application/postscript application/vnd.cups-raw 150 brother_dcpt230_pjl_ps"
 
 *% Raster format hints: tell cgpdftoraster / rastertopwg what to produce.
 *% The DCP-T230 wants 8-bit-per-color sRGB (colorspace 19) for colour, or

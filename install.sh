@@ -42,15 +42,13 @@ if ! ( mkdir -p "$FILTER_DIR" && touch "$FILTER_DIR/.wtest" ) 2>/dev/null; then
 fi
 rm -f "$FILTER_DIR/.wtest"
 
-# --- Install the filter ----------------------------------------------------
+# --- Install the filters ---------------------------------------------------
 mkdir -p "$VENDOR_DIR"
-install -m 0755 "$FILTER_SRC" "$VENDOR_DIR/$FILTER_NAME"
-log "installed filter: $VENDOR_DIR/$FILTER_NAME"
-
-# Symlink the filter into CUPS's filter search path.
-ln -sf "$VENDOR_DIR/$FILTER_NAME" "$FILTER_DIR/$FILTER_NAME"
-chmod 0755 "$VENDOR_DIR/$FILTER_NAME"
-log "linked: $FILTER_DIR/$FILTER_NAME -> $VENDOR_DIR/$FILTER_NAME"
+for f in "$FILTER_NAME" brother_dcpt230_pjl_pdf brother_dcpt230_pjl_ps; do
+    install -m 0755 "$SCRIPT_DIR/$f" "$VENDOR_DIR/$f"
+    ln -sf "$VENDOR_DIR/$f" "$FILTER_DIR/$f"
+    log "installed: $VENDOR_DIR/$f → $FILTER_DIR/$f"
+done
 
 # --- Install the PPD (gzipped, where macOS expects it) ---------------------
 mkdir -p "$PPD_DIR"

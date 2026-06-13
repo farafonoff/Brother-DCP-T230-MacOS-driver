@@ -59,9 +59,11 @@ fi
 # --- Filter path: Debian puts CUPS filters under /usr/lib/cups/filter --------
 [[ -d "$FILTER_DIR" ]] || die "CUPS filter directory not found at $FILTER_DIR (is cups installed?)"
 
-# --- Install the filter -------------------------------------------------------
-install -m 0755 -o root -g root "$FILTER_SRC" "$FILTER_DIR/$FILTER_NAME"
-log "installed filter: $FILTER_DIR/$FILTER_NAME"
+# --- Install the filters ------------------------------------------------------
+install -m 0755 -o root -g root "$FILTER_SRC"                    "$FILTER_DIR/$FILTER_NAME"
+install -m 0755 -o root -g root "$SCRIPT_DIR/brother_dcpt230_pjl_pdf" "$FILTER_DIR/brother_dcpt230_pjl_pdf"
+install -m 0755 -o root -g root "$SCRIPT_DIR/brother_dcpt230_pjl_ps"  "$FILTER_DIR/brother_dcpt230_pjl_ps"
+log "installed filters: $FILTER_DIR/$FILTER_NAME, brother_dcpt230_pjl_pdf, brother_dcpt230_pjl_ps"
 
 # --- Install the PPD ----------------------------------------------------------
 mkdir -p "$PPD_DIR"

@@ -1,0 +1,15 @@
+#!/bin/bash
+# CUPS filter: application/pdf → application/vnd.cups-raw (Brother DCP-T230)
+# Wraps pdftoraster | brother_dcpt230_pjl in a single step so CUPS cannot
+# insert a passthrough between them.
+set -o pipefail
+
+for _d in /usr/lib/cups/filter /usr/libexec/cups/filter /usr/local/libexec/cups/filter; do
+    [[ -x "$_d/pdftoraster" ]] && { SYS="$_d"; break; }
+done
+[[ -z "${SYS:-}" ]] && { echo "ERROR: pdftoraster not found" >&2; exit 1; }
+
+# Tell pdftoraster to produce image/pwg-raster (RaS2).
+export FINAL_CONTENT_TYPE=image/pwg-raster CONTENT_TYPE=application/pdf
+
+"$SYS/pdftoraster" "$@" | "$SYS/brother_dcpt230_pjl" "$1" "$2" "$3" "$4" "$5"
