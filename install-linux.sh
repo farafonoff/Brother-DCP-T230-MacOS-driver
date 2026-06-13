@@ -79,7 +79,7 @@ fi
 # --- Optionally register a printer via lpadmin --------------------------------
 if command -v lpinfo >/dev/null 2>&1; then
     log "scanning USB backends for the DCP-T230..."
-    USB_LINE="$(lpinfo -v 2>/dev/null | awk '/usb:.*DCP[_-]?T230/i {print; exit}')"
+    USB_LINE="$(lpinfo -v 2>/dev/null | awk '/usb:.*DCP[_-]?T230/ {print; exit}')"
     if [[ -n "$USB_LINE" ]]; then
         PRINTER_URI="$(awk '{print $2}' <<<"$USB_LINE")"
         log "found printer at: $PRINTER_URI"
