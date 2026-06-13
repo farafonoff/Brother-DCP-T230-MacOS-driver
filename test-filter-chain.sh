@@ -35,11 +35,14 @@ GS_EXIT=$?
 cat "$DIR/gs.log"
 log "gstoraster exit: $GS_EXIT"
 
-SYNC=$(xxd "$DIR/test.ras" | head -1 | awk '{print $2$3}' | cut -c1-8)
-log "raster sync word: $SYNC"
+SYNC=$(head -c 4 "$DIR/test.ras" | od -A n -t x1 | tr -d ' \n')
+SYNC_ASCII=$(head -c 4 "$DIR/test.ras" | cat -v)
+log "raster sync word: $SYNC  ($SYNC_ASCII)"
 case "$SYNC" in
     52615332) ok "RaS2 — correct, filter will accept this" ;;
     52615333) fail "RaS3 — mismatch! filter expects RaS2. cupsRasterVersion not respected by gstoraster." ;;
+    52615374) fail "RaSt — CUPS Raster v1, not PWG. FINAL_CONTENT_TYPE not picked up." ;;
+    "")       fail "empty output — gstoraster produced no raster data" ;;
     *)        fail "unknown sync word: $SYNC" ;;
 esac
 
