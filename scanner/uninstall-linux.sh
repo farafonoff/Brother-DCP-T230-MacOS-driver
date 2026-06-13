@@ -1,39 +1,39 @@
 #!/bin/bash
-# Remove the t230web systemd user service installed by install-linux.sh.
+# Remove the t230web systemd service installed by install-linux.sh.
+# Run with sudo to remove a system service, without sudo for a user service.
 #
-# Scan images in ~/Pictures/T230/ and /tmp/t230/ are left untouched.
-# The udev rule and plugdev group membership are left in place (they are
-# harmless and removing them would require additional sudo prompts).
+# Scan images in ~/Pictures/T230/ are left untouched.
 
 set -euo pipefail
 
 SERVICE_NAME="t230scan"
-SERVICE_DIR="$HOME/.config/systemd/user"
-SERVICE_PATH="$SERVICE_DIR/$SERVICE_NAME.service"
 
 log() { printf '[uninstall-scanner] %s\n' "$*"; }
 
-# --- Stop and disable ---------------------------------------------------------
-if systemctl --user is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-    systemctl --user stop "$SERVICE_NAME"
-    log "service stopped"
+if [[ $EUID -eq 0 ]]; then
+    SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME.service"
+    SYSTEMCTL="systemctl"
 else
-    log "service not currently running"
+    SERVICE_PATH="$HOME/.config/systemd/user/$SERVICE_NAME.service"
+    SYSTEMCTL="systemctl --user"
 fi
 
-if systemctl --user is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
-    systemctl --user disable "$SERVICE_NAME"
+if $SYSTEMCTL is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+    $SYSTEMCTL stop "$SERVICE_NAME"
+    log "service stopped"
+fi
+
+if $SYSTEMCTL is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
+    $SYSTEMCTL disable "$SERVICE_NAME"
     log "service disabled"
 fi
 
-# --- Remove unit file ---------------------------------------------------------
 if [[ -f "$SERVICE_PATH" ]]; then
     rm -f "$SERVICE_PATH"
-    systemctl --user daemon-reload
+    $SYSTEMCTL daemon-reload
     log "removed $SERVICE_PATH"
 else
-    log "service file not found at $SERVICE_PATH (already removed?)"
+    log "service file not found (already removed?)"
 fi
 
-log "done. Scan images in ~/Pictures/T230/ and /tmp/t230/ were left in place."
-log "The udev rule /etc/udev/rules.d/70-brother-t230.rules was left in place."
+log "done. Scan images in ~/Pictures/T230/ were left in place."

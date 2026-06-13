@@ -1,94 +1,148 @@
 #!/bin/bash
-# Install t230web.py as a systemd user service on Debian / Armbian / Ubuntu.
+# Install t230web.py as a systemd service on Debian / Armbian / Ubuntu.
 #
-# After installation the scanner UI starts automatically on every login and
-# is available at http://127.0.0.1:8080/  (override with T230_PORT env var).
+# Run as root  → system service, port 80, accessible on the LAN
+#   sudo ./install-linux.sh
 #
-# Does NOT require sudo — systemd user services live in
-# ~/.config/systemd/user/.
+# Run as user  → user service, port 8080, localhost only
+#   ./install-linux.sh
 #
-# Requirements:
-#   - systemd (standard on Debian 8+, Armbian, Ubuntu 15.04+)
-#   - Python 3.10+
-#   - uv  (https://docs.astral.sh/uv/)
-#   - libusb-1.0  (sudo apt install libusb-1.0-0)
+# Override defaults:
+#   sudo T230_PORT=8080 T230_HOST=0.0.0.0 ./install-linux.sh
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WEB_SCRIPT="$SCRIPT_DIR/t230web.py"
-
 SERVICE_NAME="t230scan"
-SERVICE_DIR="$HOME/.config/systemd/user"
-SERVICE_PATH="$SERVICE_DIR/$SERVICE_NAME.service"
-LOG_DIR="$HOME/.local/share/t230scan/logs"
-PORT="${T230_PORT:-8080}"
 
 log() { printf '[install-scanner] %s\n' "$*"; }
 die() { printf '[install-scanner] ERROR: %s\n' "$*" >&2; exit 1; }
 
 [[ -f "$WEB_SCRIPT" ]] || die "t230web.py not found at $WEB_SCRIPT"
+command -v systemctl >/dev/null 2>&1 || die "systemctl not found — this script requires systemd."
+command -v python3   >/dev/null 2>&1 || die "python3 not found — install it: sudo apt install python3"
 
-# --- Require systemd ----------------------------------------------------------
-if ! command -v systemctl >/dev/null 2>&1; then
-    die "systemctl not found — this script requires systemd."
+# ── System vs user service ────────────────────────────────────────────────────
+
+if [[ $EUID -eq 0 ]]; then
+    SYSTEM_SERVICE=true
+    SERVICE_DIR="/etc/systemd/system"
+    DEFAULT_PORT=80
+    DEFAULT_HOST="0.0.0.0"
+    LOG_DIR="/var/log/t230scan"
+    RUN_USER="root"
+    SYSTEMCTL="systemctl"
+else
+    SYSTEM_SERVICE=false
+    SERVICE_DIR="$HOME/.config/systemd/user"
+    DEFAULT_PORT=8080
+    DEFAULT_HOST="127.0.0.1"
+    LOG_DIR="$HOME/.local/share/t230scan/logs"
+    RUN_USER="$USER"
+    SYSTEMCTL="systemctl --user"
 fi
 
-# --- Require uv ---------------------------------------------------------------
-if ! command -v uv >/dev/null 2>&1; then
-    die "uv not found — install it first:
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-then re-run this script."
-fi
-UV="$(command -v uv)"
-log "uv: $UV"
+PORT="${T230_PORT:-$DEFAULT_PORT}"
+HOST="${T230_HOST:-$DEFAULT_HOST}"
+SERVICE_PATH="$SERVICE_DIR/$SERVICE_NAME.service"
 
-# --- Require libusb -----------------------------------------------------------
-if ! ldconfig -p 2>/dev/null | grep -q 'libusb-1\.0' && \
-   ! ls /usr/lib/*/libusb-1.0.so* /usr/lib/libusb-1.0.so* 2>/dev/null | grep -q .; then
-    log "WARNING: libusb-1.0 not found in ldconfig — you may need to run:"
+log "mode: $( [[ $SYSTEM_SERVICE == true ]] && echo 'system service (root)' || echo 'user service' )"
+log "bind: $HOST:$PORT"
+
+# ── Python runner: prefer uv, fall back to plain python3 ─────────────────────
+
+if command -v uv >/dev/null 2>&1; then
+    UV="$(command -v uv)"
+    EXEC_START="${UV} run --quiet --script ${WEB_SCRIPT}"
+    log "runner: uv ($UV)"
+else
+    log "uv not found — using python3 directly"
+    PYTHON3="$(command -v python3)"
+
+    # Install Python dependencies if missing.
+    missing_deps=()
+    python3 -c "import usb1"     2>/dev/null || missing_deps+=(libusb1)
+    python3 -c "from PIL import Image" 2>/dev/null || missing_deps+=(Pillow)
+
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        log "installing Python packages: ${missing_deps[*]}"
+        # Try apt first for Pillow (avoids Debian's pip restrictions).
+        if [[ " ${missing_deps[*]} " == *" Pillow "* ]]; then
+            if apt-cache show python3-pil >/dev/null 2>&1; then
+                $( [[ $SYSTEM_SERVICE == true ]] && echo '' || echo 'sudo' ) \
+                    apt-get install -y -q python3-pil && missing_deps=(${missing_deps[@]/Pillow/}) || true
+            fi
+        fi
+        # Remaining deps via pip.
+        if [[ ${#missing_deps[@]} -gt 0 ]]; then
+            pip3 install --quiet --break-system-packages "${missing_deps[@]}" 2>/dev/null \
+                || pip3 install --quiet "${missing_deps[@]}"
+        fi
+    fi
+
+    # Verify.
+    python3 -c "import usb1" 2>/dev/null \
+        || die "libusb1 Python package not found. Install: pip3 install libusb1"
+    python3 -c "from PIL import Image" 2>/dev/null \
+        || log "WARNING: Pillow not available — thumbnails will use full images"
+
+    EXEC_START="${PYTHON3} ${WEB_SCRIPT}"
+    log "runner: python3 ($PYTHON3)"
+fi
+
+# ── python3-usb check (button listener) ──────────────────────────────────────
+
+if ! python3 -c "import usb.core" 2>/dev/null; then
+    log "WARNING: python3-usb not found — hardware scan button will be disabled."
+    log "  sudo apt install python3-usb"
+fi
+
+# ── libusb system library ─────────────────────────────────────────────────────
+
+if ! ldconfig -p 2>/dev/null | grep -q 'libusb-1\.0'; then
+    log "WARNING: libusb-1.0-0 system library not found."
     log "  sudo apt install libusb-1.0-0"
 fi
 
-# --- Allow USB access without sudo --------------------------------------------
-# On Linux the scanner USB device is owned by root:plugdev by default.
-# Add the current user to the plugdev group so uv/python can open it.
-if ! groups | grep -qw plugdev; then
-    log "Adding $USER to plugdev group (required for USB access)..."
-    sudo usermod -aG plugdev "$USER" || log "WARNING: could not add to plugdev — you may need: sudo usermod -aG plugdev $USER"
-    log "NOTE: You must log out and back in for group membership to take effect."
-fi
+# ── udev rule (lets non-root access the USB device) ──────────────────────────
 
-# Install a udev rule so the T230 device node is group-readable by plugdev.
 UDEV_RULE_PATH="/etc/udev/rules.d/70-brother-t230.rules"
+UDEV_CONTENT='# Brother DCP-T230 — allow plugdev members to open the USB device
+SUBSYSTEM=="usb", ATTR{idVendor}=="04f9", ATTR{idProduct}=="0716", MODE="0664", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTR{idVendor}=="04f9", ATTR{idProduct}=="0439", MODE="0664", GROUP="plugdev"'
+
 if [[ ! -f "$UDEV_RULE_PATH" ]]; then
-    log "Installing udev rule for Brother DCP-T230 (requires sudo)..."
-    sudo tee "$UDEV_RULE_PATH" >/dev/null <<'UDEV'
-# Brother DCP-T230 — allow plugdev members to open the USB device
-SUBSYSTEM=="usb", ATTR{idVendor}=="04f9", ATTR{idProduct}=="0439", MODE="0664", GROUP="plugdev"
-UDEV
-    sudo udevadm control --reload-rules
-    sudo udevadm trigger --subsystem-match=usb || true
-    log "udev rule installed: $UDEV_RULE_PATH"
-else
-    log "udev rule already present: $UDEV_RULE_PATH"
+    log "installing udev rule → $UDEV_RULE_PATH"
+    if [[ $SYSTEM_SERVICE == true ]]; then
+        echo "$UDEV_CONTENT" > "$UDEV_RULE_PATH"
+    else
+        echo "$UDEV_CONTENT" | sudo tee "$UDEV_RULE_PATH" >/dev/null
+    fi
+    udevadm control --reload-rules 2>/dev/null \
+        || sudo udevadm control --reload-rules 2>/dev/null || true
+    udevadm trigger --subsystem-match=usb 2>/dev/null \
+        || sudo udevadm trigger --subsystem-match=usb 2>/dev/null || true
 fi
 
-# --- Enable lingering so service runs without an active login session ---------
-# (Optional but useful on headless / Armbian boards.)
-if command -v loginctl >/dev/null 2>&1; then
+# ── lingering (user service only) ────────────────────────────────────────────
+
+if [[ $SYSTEM_SERVICE == false ]] && command -v loginctl >/dev/null 2>&1; then
     if ! loginctl show-user "$USER" 2>/dev/null | grep -q 'Linger=yes'; then
-        log "Enabling systemd user lingering for $USER (requires sudo)..."
-        sudo loginctl enable-linger "$USER" || log "WARNING: could not enable lingering — service will only run while you are logged in."
+        log "enabling systemd user lingering for $USER..."
+        sudo loginctl enable-linger "$USER" \
+            || log "WARNING: could not enable lingering — service won't start without an active session."
     fi
 fi
 
-# --- Log directory ------------------------------------------------------------
-mkdir -p "$LOG_DIR"
-log "logs: $LOG_DIR/t230scan.log"
+# ── Log directory ─────────────────────────────────────────────────────────────
 
-# --- Write service unit -------------------------------------------------------
+mkdir -p "$LOG_DIR"
+
+# ── Systemd unit file ─────────────────────────────────────────────────────────
+
 mkdir -p "$SERVICE_DIR"
+
 cat > "$SERVICE_PATH" <<UNIT
 [Unit]
 Description=Brother DCP-T230 scanner web UI
@@ -96,43 +150,42 @@ After=network.target
 
 [Service]
 Type=simple
+User=${RUN_USER}
 WorkingDirectory=${SCRIPT_DIR}
-ExecStart=${UV} run --quiet --script ${WEB_SCRIPT}
+ExecStart=${EXEC_START}
 Environment=T230_PORT=${PORT}
-Environment=HOME=${HOME}
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:$(dirname "$UV")
+Environment=T230_HOST=${HOST}
+Environment=HOME=$( [[ $SYSTEM_SERVICE == true ]] && echo "/root" || echo "$HOME" )
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
 
-# Restart on crash; don't restart on clean exit (code 0).
 Restart=on-failure
 RestartSec=5
 
-# Log to the systemd journal; also redirect to a plain file via
-# StandardOutput/StandardError so the same log path works on boards
-# that lack persistent journald storage (common on Armbian).
 StandardOutput=append:${LOG_DIR}/t230scan.log
 StandardError=append:${LOG_DIR}/t230scan.log
 
 [Install]
-WantedBy=default.target
+WantedBy=$( [[ $SYSTEM_SERVICE == true ]] && echo "multi-user.target" || echo "default.target" )
 UNIT
 
 log "wrote: $SERVICE_PATH"
 
-# --- Reload systemd and enable/start service ----------------------------------
-systemctl --user daemon-reload
+# ── Enable and start ──────────────────────────────────────────────────────────
 
-if systemctl --user is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+$SYSTEMCTL daemon-reload
+
+if $SYSTEMCTL is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
     log "service already running — restarting..."
-    systemctl --user restart "$SERVICE_NAME"
+    $SYSTEMCTL restart "$SERVICE_NAME"
 else
-    systemctl --user enable --now "$SERVICE_NAME"
+    $SYSTEMCTL enable --now "$SERVICE_NAME"
 fi
 
 log "done."
 log ""
-log "  Scanner UI → http://127.0.0.1:${PORT}/"
+log "  Scanner UI → http://${HOST}:${PORT}/"
 log "  Logs       → $LOG_DIR/t230scan.log"
-log "               journalctl --user -u $SERVICE_NAME -f"
-log "  Stop now   → systemctl --user stop $SERVICE_NAME"
-log "  Start now  → systemctl --user start $SERVICE_NAME"
+log "               $SYSTEMCTL status $SERVICE_NAME"
+log "               journalctl $( [[ $SYSTEM_SERVICE == false ]] && echo '--user' ) -u $SERVICE_NAME -f"
+log "  Stop       → $SYSTEMCTL stop $SERVICE_NAME"
 log "  Uninstall  → $SCRIPT_DIR/uninstall-linux.sh"
