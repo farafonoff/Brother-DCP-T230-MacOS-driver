@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Probe which USB endpoint sends button-press events on the DCP-T230.
+"""Probe scan-button state on the DCP-T230 via USB control transfer.
 
-Run as root (or with appropriate udev permissions), then press the
-scan button combo on the printer. The endpoint and raw bytes are
-printed so the result can be wired into t230scan.py.
+Reverse-engineered from brscan-skey-exe (usb_scanner_check_status):
+  bmRequestType=0xC0, bRequest=0x03, wValue=0, wIndex=0, wLength=255
+Response is ASCII text; decode_key_data in the binary parses tokens
+like IMAGE / EMAIL / FILE to identify which button was pressed.
+
+Run as root (or with appropriate udev permissions) and press the
+scan button combo on the printer.
 """
 import sys
+import time
 import usb.core
 import usb.util
 
@@ -16,21 +21,17 @@ dev = usb.core.find(idVendor=VENDOR, idProduct=PRODUCT)
 if not dev:
     sys.exit(f"device {VENDOR:04x}:{PRODUCT:04x} not found — is the printer on?")
 
-for iface in (1, 2):
-    try:
-        dev.detach_kernel_driver(iface)
-    except Exception:
-        pass
-    usb.util.claim_interface(dev, iface)
-
-print("waiting for button press (Ctrl-C to quit)...")
+# Control transfer needs no interface claim.
+print("polling for button press every 200 ms (Ctrl-C to quit)...")
+last = None
 while True:
-    for ep, iface in [(0x84, 1), (0x88, 2)]:
-        try:
-            data = dev.read(ep, 64, timeout=500)
-            if data:
-                print(f"EP {ep:#x} (iface {iface}): {bytes(data).hex()}  {bytes(data)!r}")
-        except usb.core.USBTimeoutError:
-            pass
-        except Exception as e:
-            print(f"EP {ep:#x} (iface {iface}): {e}")
+    try:
+        data = bytes(dev.ctrl_transfer(0xC0, 0x03, 0, 0, 255, timeout=2000))
+        if data and data != last:
+            last = data
+            print(f"response: {data.hex()}  {data!r}")
+    except usb.core.USBTimeoutError:
+        pass
+    except Exception as e:
+        print(f"error: {e}")
+    time.sleep(0.2)
