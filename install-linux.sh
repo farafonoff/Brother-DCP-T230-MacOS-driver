@@ -76,29 +76,6 @@ if command -v cupstestppd >/dev/null 2>&1; then
     fi
 fi
 
-# --- Allow remote access in cupsd.conf (Debian default is localhost-only) ----
-CUPSD_CONF="/etc/cups/cupsd.conf"
-if grep -q 'Listen localhost' "$CUPSD_CONF" 2>/dev/null; then
-    sed -i 's/^Listen localhost.*/Port 631/' "$CUPSD_CONF"
-    log "cupsd.conf: changed 'Listen localhost' → 'Port 631' (network access)"
-fi
-# Ensure <Location /> and <Location /printers> allow network access.
-if ! grep -q 'Allow @LOCAL' "$CUPSD_CONF" 2>/dev/null; then
-    cat >> "$CUPSD_CONF" <<'CONF'
-
-# Added by Brother DCP-T230 install-linux.sh — allow LAN access
-<Location />
-  Order allow,deny
-  Allow @LOCAL
-</Location>
-<Location /printers>
-  Order allow,deny
-  Allow @LOCAL
-</Location>
-CONF
-    log "cupsd.conf: added Allow @LOCAL for LAN access"
-fi
-
 # --- Restart CUPS so it picks up the new filter and PPD ----------------------
 if systemctl is-active --quiet cups 2>/dev/null; then
     systemctl restart cups
