@@ -91,8 +91,10 @@ fi
 if [[ -n "$PRINTER_URI" ]]; then
     read -r -p "[install] Register CUPS queue '$PRINTER_NAME' using $PRINTER_URI? [y/N] " ans
     if [[ "${ans:-n}" =~ ^[Yy]$ ]]; then
-        lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -P "$PPD_DEST"
-        lpadmin -p "$PRINTER_NAME" -o printer-is-shared=false || true
+        # CUPS 2.4+ prints "Printer drivers are deprecated" here — expected, non-fatal.
+        # The DCP-T230 has no native IPP-over-USB support so PPD/filter is the only option.
+        lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -P "$PPD_DEST" 2>&1 | grep -v 'deprecated' || true
+        lpadmin -p "$PRINTER_NAME" -o printer-is-shared=false 2>/dev/null || true
         cupsenable  "$PRINTER_NAME" || true
         cupsaccept  "$PRINTER_NAME" || true
         log "queue '$PRINTER_NAME' created and enabled"
