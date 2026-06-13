@@ -586,6 +586,10 @@ function setBodyState(s) {
 function setStatus(msg) { status.textContent = msg; }
 function setMeta(msg)   { meta.textContent   = msg; }
 
+function randomId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+
 function startTimer(label) {
   const t0 = performance.now();
   timer = setInterval(() => {
@@ -607,7 +611,7 @@ scanBtn.addEventListener('click', () => {
   const dpi      = document.getElementById('dpi').value;
   const mode     = document.getElementById('mode').value;
   const modeLabel = mode === 'C24BIT' ? 'Color' : 'Grayscale';
-  currentScanId  = crypto.randomUUID();
+  currentScanId  = randomId();
   scanBtn.disabled  = true;
   cancelBtn.disabled = false;
   dlBox.style.display = 'none';
