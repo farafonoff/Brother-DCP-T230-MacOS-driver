@@ -427,6 +427,25 @@ PAGE = """<!doctype html>
   }
   .history-card-dl:hover { background: linear-gradient(#445544, #384a38); }
 
+  /* ── History-load spinner ── */
+  #spinner {
+    display: none; position: absolute;
+    inset: 0; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.25); border-radius: 2px;
+    pointer-events: none;
+  }
+  #spinner.active { display: flex; }
+  #spinner::after {
+    content: '';
+    width: 36px; height: 36px;
+    border: 3px solid rgba(255,255,255,0.15);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  section.preview { position: relative; }
+
   /* Lock all interactive controls while a scan is in progress */
   body.scanning select,
   body.scanning .history-card,
@@ -543,6 +562,7 @@ PAGE = """<!doctype html>
   <section class="preview">
     <img id="preview" alt="scanned image">
     <div class="empty-hint">No image. Press <strong>Scan</strong> to start.</div>
+    <div id="spinner"></div>
   </section>
 
   <!-- ── Right column: history ── -->
@@ -570,6 +590,7 @@ const img       = document.getElementById('preview');
 const status    = document.getElementById('status');
 const meta      = document.getElementById('meta');
 const histList  = document.getElementById('historyList');
+const spinner   = document.getElementById('spinner');
 
 let currentScanId    = null;   // active HTTP-streaming scan
 let lastHistoryKey   = '';     // fingerprint of last rendered history
@@ -624,6 +645,7 @@ scanBtn.addEventListener('click', () => {
 });
 
 img.addEventListener('load', () => {
+  spinner.classList.remove('active');
   stopTimer();
   cancelBtn.disabled = true;
   scanBtn.disabled   = false;
@@ -638,6 +660,7 @@ img.addEventListener('load', () => {
 });
 
 img.addEventListener('error', () => {
+  spinner.classList.remove('active');
   stopTimer();
   cancelBtn.disabled = true;
   scanBtn.disabled   = false;
@@ -718,6 +741,7 @@ function renderHistory(items) {
 }
 
 function showHistoryItem(item) {
+  spinner.classList.add('active');
   selectedFilename = item.filename;
   // Update active styling.
   document.querySelectorAll('.history-card').forEach(c => {
