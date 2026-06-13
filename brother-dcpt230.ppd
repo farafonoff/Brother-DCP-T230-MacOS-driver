@@ -36,11 +36,12 @@
 *cupsModelNumber: 0
 *cupsLanguages: "en"
 
-*% Direct PWG Raster path (used by macOS with this PPD installed locally).
-*cupsFilter: "image/pwg-raster 0 brother_dcpt230_pjl"
+*% When cupsFilter2 entries are present CUPS ignores cupsFilter entirely,
+*% so all steps including the final printer filter must be cupsFilter2.
+*% Output type application/vnd.cups-raw signals "send raw to the backend".
+*cupsFilter2: "image/pwg-raster application/vnd.cups-raw 0 brother_dcpt230_pjl"
 
-*% Linux conversion paths: PDF preferred (poppler, fast), PostScript fallback (ghostscript, slow).
-*% Lower cost = higher preference; clients that support PDF will use it.
+*% Conversion paths: PDF preferred (poppler, fast), PostScript fallback (ghostscript, slow).
 *cupsFilter2: "application/pdf image/pwg-raster 100 pdftoraster"
 *cupsFilter2: "application/postscript image/pwg-raster 150 gstoraster"
 
