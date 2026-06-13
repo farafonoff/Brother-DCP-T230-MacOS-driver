@@ -7,7 +7,7 @@
 # Must be run as root: sudo ./install-linux.sh
 #
 # Requirements (auto-checked below):
-#   sudo apt install cups python3 python3-usb
+#   sudo apt install cups python3 python3-usb cups-filters ghostscript
 
 set -euo pipefail
 
@@ -33,8 +33,10 @@ die() { printf '[install] ERROR: %s\n' "$*" >&2; exit 1; }
 
 # --- Check dependencies -------------------------------------------------------
 missing_pkgs=()
-command -v cupsd   >/dev/null 2>&1 || missing_pkgs+=(cups)
-command -v python3 >/dev/null 2>&1 || missing_pkgs+=(python3)
+command -v cupsd       >/dev/null 2>&1 || missing_pkgs+=(cups)
+command -v python3     >/dev/null 2>&1 || missing_pkgs+=(python3)
+command -v pdftoraster >/dev/null 2>&1 || missing_pkgs+=(cups-filters)
+command -v gs          >/dev/null 2>&1 || missing_pkgs+=(ghostscript)
 
 if [[ ${#missing_pkgs[@]} -gt 0 ]]; then
     die "missing packages: ${missing_pkgs[*]}

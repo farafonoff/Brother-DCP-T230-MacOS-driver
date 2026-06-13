@@ -1,12 +1,17 @@
 *PPD-Adobe: "4.3"
 *%================================================================
-*% Brother DCP-T230 - native macOS PPD (open-source reimplementation)
+*% Brother DCP-T230 — native CUPS PPD (open-source reimplementation)
 *%
 *% Pairs with the `brother_dcpt230_pjl` Python CUPS filter.  The
 *% filter accepts PWG Raster on stdin and emits PJL-wrapped PWG
-*% Raster for USB delivery.  macOS handles all the work of turning
-*% PDFs into PWG Raster via its built-in filter chain
-*% (cgpdftoraster -> rastertopwg -> this filter -> USB backend).
+*% Raster for USB delivery.
+*%
+*% macOS: built-in filter chain handles PDF→PWG Raster conversion
+*%        (cgpdftoraster -> rastertopwg -> this filter -> USB backend).
+*%
+*% Linux: cups-filters + ghostscript handle PDF/PS→PWG Raster
+*%        (pdftoraster / gstoraster -> this filter -> USB backend).
+*%        Required packages: cups-filters ghostscript
 *%
 *% Protocol reverse-engineered from Brother's Linux binary
 *% `brdcpt230filter`; see README.md for the analysis.
@@ -30,7 +35,15 @@
 *cupsManualCopies: True
 *cupsModelNumber: 0
 *cupsLanguages: "en"
+
+*% Direct PWG Raster path (used by macOS with this PPD installed locally).
 *cupsFilter: "image/pwg-raster 0 brother_dcpt230_pjl"
+
+*% Linux conversion paths: PDF/PS → PWG Raster → brother_dcpt230_pjl.
+*% Requires cups-filters (pdftoraster) and ghostscript (gstoraster).
+*% macOS CUPS ignores these if the named filters are absent.
+*cupsFilter2: "application/pdf image/pwg-raster 100 pdftoraster"
+*cupsFilter2: "application/postscript image/pwg-raster 150 gstoraster"
 
 *% Raster format hints: tell cgpdftoraster / rastertopwg what to produce.
 *% The DCP-T230 wants 8-bit-per-color sRGB (colorspace 19) for colour, or
