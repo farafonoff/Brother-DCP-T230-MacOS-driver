@@ -76,6 +76,29 @@ if command -v cupstestppd >/dev/null 2>&1; then
     fi
 fi
 
+# --- Allow remote access in cupsd.conf (Debian default is localhost-only) ----
+CUPSD_CONF="/etc/cups/cupsd.conf"
+if grep -q 'Listen localhost' "$CUPSD_CONF" 2>/dev/null; then
+    sed -i 's/^Listen localhost.*/Port 631/' "$CUPSD_CONF"
+    log "cupsd.conf: changed 'Listen localhost' → 'Port 631' (network access)"
+fi
+# Ensure <Location /> and <Location /printers> allow network access.
+if ! grep -q 'Allow @LOCAL' "$CUPSD_CONF" 2>/dev/null; then
+    cat >> "$CUPSD_CONF" <<'CONF'
+
+# Added by Brother DCP-T230 install-linux.sh — allow LAN access
+<Location />
+  Order allow,deny
+  Allow @LOCAL
+</Location>
+<Location /printers>
+  Order allow,deny
+  Allow @LOCAL
+</Location>
+CONF
+    log "cupsd.conf: added Allow @LOCAL for LAN access"
+fi
+
 # --- Restart CUPS so it picks up the new filter and PPD ----------------------
 if systemctl is-active --quiet cups 2>/dev/null; then
     systemctl restart cups
@@ -97,22 +120,17 @@ if command -v lpinfo >/dev/null 2>&1; then
 fi
 
 if [[ -n "$PRINTER_URI" ]]; then
-    read -r -p "[install] Register CUPS queue '$PRINTER_NAME' using $PRINTER_URI? [y/N] " ans
-    if [[ "${ans:-n}" =~ ^[Yy]$ ]]; then
-        lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -P "$PPD_DEST"
-        lpadmin -p "$PRINTER_NAME" -o printer-is-shared=true || true
-        cupsenable  "$PRINTER_NAME" || true
-        cupsaccept  "$PRINTER_NAME" || true
-        log "queue '$PRINTER_NAME' created, enabled, and shared on the network"
-        log "test with:  lp -d $PRINTER_NAME /usr/share/doc/cups/examples/testprint.pdf"
-    else
-        log "skipped lpadmin registration"
-    fi
+    lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -P "$PPD_DEST"
+    lpadmin -p "$PRINTER_NAME" -o printer-is-shared=true || true
+    cupsenable "$PRINTER_NAME" || true
+    cupsaccept "$PRINTER_NAME" || true
+    log "queue '$PRINTER_NAME' created, enabled, shared"
+    log "  IPP URI  → ipp://$(hostname -f)/printers/$PRINTER_NAME"
+    log "  test     → lp -d $PRINTER_NAME /usr/share/doc/cups/examples/testprint.pdf"
 else
-    log "skipping lpadmin registration"
-    log "Add the printer later with:"
-    log "  sudo lpadmin -p $PRINTER_NAME -E -v <URI> -P $PPD_DEST"
-    log "  lpinfo -v   # to find the URI once the printer is connected"
+    log "printer not detected over USB — register it later once connected:"
+    log "  URI      → lpinfo -v | grep -i t230"
+    log "  register → sudo lpadmin -p $PRINTER_NAME -E -v <URI> -P $PPD_DEST -o printer-is-shared=true"
 fi
 
 log "done."
