@@ -572,6 +572,7 @@ const meta      = document.getElementById('meta');
 const histList  = document.getElementById('historyList');
 
 let currentScanId    = null;   // active HTTP-streaming scan
+let lastHistoryKey   = '';     // fingerprint of last rendered history
 let timer            = null;
 let selectedFilename = null;   // highlighted history card
 let lastHistoryDt    = null;   // newest dt seen, for refresh detection
@@ -664,10 +665,11 @@ async function loadHistory() {
     const r = await fetch('/history');
     if (!r.ok) return;
     const items = await r.json();
+    const key = items.map(i => i.filename).join(',');
+    if (key === lastHistoryKey) return;
+    lastHistoryKey = key;
     renderHistory(items);
-  } catch (e) {
-    // Silently ignore network errors — history is best-effort.
-  }
+  } catch (e) {}
 }
 
 function renderHistory(items) {
