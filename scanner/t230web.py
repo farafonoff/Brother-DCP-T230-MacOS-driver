@@ -154,13 +154,16 @@ def scan_background(dpi: int = 300, mode: str = "C24BIT") -> None:
         _scanning = True
 
     pic_path = pictures_path(dpi, mode)
+    pic_part = pic_path.with_suffix(".part")
     sys.stderr.write(f"[button-scan] starting {dpi} DPI {mode} → {pic_path}\n")
+    saved = False
     try:
-        with T230() as scanner, open(pic_path, "wb") as f:
+        with T230() as scanner, open(pic_part, "wb") as f:
             for band in scanner.scan(dpi, mode):
                 f.write(band)
+        pic_part.rename(pic_path)
+        saved = True
         sys.stderr.write(f"[button-scan] saved {pic_path}\n")
-        # Generate thumbnail.
         thumb_path = THUMB_DIR / pic_path.name
         _make_thumbnail(pic_path, thumb_path)
     except DeviceNotFound as e:
@@ -168,6 +171,8 @@ def scan_background(dpi: int = 300, mode: str = "C24BIT") -> None:
     except (ScanError, ProtocolError, Exception) as e:
         sys.stderr.write(f"[button-scan] {type(e).__name__}: {e}\n")
     finally:
+        if not saved:
+            pic_part.unlink(missing_ok=True)
         with _scanning_lock:
             _scanning = False
         scan_lock.release()
@@ -656,6 +661,7 @@ img.addEventListener('load', () => {
     setStatus(`Done · ${img.naturalWidth}×${img.naturalHeight} px · saved to ~/Pictures/T230/`);
   }
   // Refresh history so the new scan appears immediately.
+  lastHistoryKey = '';
   setTimeout(loadHistory, 800);
 });
 
@@ -711,6 +717,10 @@ function renderHistory(items) {
     thumb.src = item.thumb;
     thumb.alt = '';
     thumb.loading = 'lazy';
+    thumb.onerror = () => {
+      // Thumbnail may still be generating — retry after 3 s.
+      setTimeout(() => { thumb.src = item.thumb + '?t=' + Date.now(); }, 3000);
+    };
     card.appendChild(thumb);
 
     // Meta text
@@ -782,6 +792,7 @@ async function pollScanStatus() {
       wasButtonScanning = false;
       setBodyState('done');
       setStatus('Scan complete — saved to ~/Pictures/T230/');
+      lastHistoryKey = '';
       loadHistory();
     }
   } catch (e) {
@@ -926,6 +937,7 @@ class Handler(BaseHTTPRequestHandler):
         cleanup_tmp()
         tmp_path = TMP_DIR / f"{scan_id}.jpg"
         pic_path = pictures_path(dpi, mode)
+        pic_part = pic_path.with_suffix(".part")  # atomic: rename only on success
 
         self.send_response(200)
         self.send_header("Content-Type", "image/jpeg")
@@ -935,10 +947,11 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         client_alive = True
+        saved = False
         try:
             with T230() as scanner, \
                  open(tmp_path, "wb") as tmp_f, \
-                 open(pic_path, "wb") as pic_f:
+                 open(pic_part, "wb") as pic_f:
                 for band in scanner.scan(dpi, mode, cancel=cancel):
                     tmp_f.write(band)
                     pic_f.write(band)
@@ -957,7 +970,8 @@ class Handler(BaseHTTPRequestHandler):
                         self.wfile.flush()
                     except (BrokenPipeError, ConnectionResetError, OSError):
                         client_alive = False
-            # Generate thumbnail in background so we don't hold up the response.
+            pic_part.rename(pic_path)
+            saved = True
             thumb_path = THUMB_DIR / pic_path.name
             threading.Thread(
                 target=_make_thumbnail, args=(pic_path, thumb_path),
@@ -971,6 +985,8 @@ class Handler(BaseHTTPRequestHandler):
         except (ScanError, ProtocolError, Exception) as e:
             sys.stderr.write(f"[scan] {type(e).__name__}: {e}\n")
         finally:
+            if not saved:
+                pic_part.unlink(missing_ok=True)
             with cancel_events_lock:
                 cancel_events.pop(scan_id, None)
             scan_lock.release()
