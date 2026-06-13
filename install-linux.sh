@@ -33,10 +33,11 @@ die() { printf '[install] ERROR: %s\n' "$*" >&2; exit 1; }
 
 # --- Check dependencies -------------------------------------------------------
 missing_pkgs=()
-command -v cupsd       >/dev/null 2>&1 || missing_pkgs+=(cups)
-command -v python3     >/dev/null 2>&1 || missing_pkgs+=(python3)
-command -v pdftoraster >/dev/null 2>&1 || missing_pkgs+=(cups-filters)
-command -v gs          >/dev/null 2>&1 || missing_pkgs+=(ghostscript)
+command -v cupsd   >/dev/null 2>&1 || missing_pkgs+=(cups)
+command -v python3 >/dev/null 2>&1 || missing_pkgs+=(python3)
+command -v gs      >/dev/null 2>&1 || missing_pkgs+=(ghostscript)
+# CUPS filters live in /usr/lib/cups/filter/, not on $PATH
+[[ -x /usr/lib/cups/filter/pdftoraster ]] || missing_pkgs+=(cups-filters)
 
 if [[ ${#missing_pkgs[@]} -gt 0 ]]; then
     die "missing packages: ${missing_pkgs[*]}
