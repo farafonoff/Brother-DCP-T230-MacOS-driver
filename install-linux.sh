@@ -7,7 +7,7 @@
 # Must be run as root: sudo ./install-linux.sh
 #
 # Requirements (auto-checked below):
-#   sudo apt install cups python3 python3-usb cups-filters ghostscript
+#   sudo apt install cups python3 python3-usb cups-filters avahi-daemon
 
 set -euo pipefail
 
@@ -35,13 +35,18 @@ die() { printf '[install] ERROR: %s\n' "$*" >&2; exit 1; }
 missing_pkgs=()
 command -v cupsd   >/dev/null 2>&1 || missing_pkgs+=(cups)
 command -v python3 >/dev/null 2>&1 || missing_pkgs+=(python3)
-command -v gs      >/dev/null 2>&1 || missing_pkgs+=(ghostscript)
 # CUPS filters live in /usr/lib/cups/filter/, not on $PATH
 [[ -x /usr/lib/cups/filter/pdftoraster ]] || missing_pkgs+=(cups-filters)
 
 if [[ ${#missing_pkgs[@]} -gt 0 ]]; then
     die "missing packages: ${missing_pkgs[*]}
 Install with:  sudo apt install ${missing_pkgs[*]}"
+fi
+
+# avahi-daemon enables Bonjour/AirPrint discovery for phones and tablets.
+if ! systemctl is-active --quiet avahi-daemon 2>/dev/null; then
+    log "WARNING: avahi-daemon not running — phones and tablets won't discover the printer."
+    log "  sudo apt install avahi-daemon && sudo systemctl enable --now avahi-daemon"
 fi
 
 # Warn if python3-usb is absent (filter needs it at print time).
@@ -95,10 +100,10 @@ if [[ -n "$PRINTER_URI" ]]; then
     read -r -p "[install] Register CUPS queue '$PRINTER_NAME' using $PRINTER_URI? [y/N] " ans
     if [[ "${ans:-n}" =~ ^[Yy]$ ]]; then
         lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -P "$PPD_DEST"
-        lpadmin -p "$PRINTER_NAME" -o printer-is-shared=false || true
+        lpadmin -p "$PRINTER_NAME" -o printer-is-shared=true || true
         cupsenable  "$PRINTER_NAME" || true
         cupsaccept  "$PRINTER_NAME" || true
-        log "queue '$PRINTER_NAME' created and enabled"
+        log "queue '$PRINTER_NAME' created, enabled, and shared on the network"
         log "test with:  lp -d $PRINTER_NAME /usr/share/doc/cups/examples/testprint.pdf"
     else
         log "skipped lpadmin registration"
