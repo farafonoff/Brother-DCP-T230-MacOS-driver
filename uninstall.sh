@@ -10,8 +10,15 @@ PPD_NAME="Brother-DCP-T230.ppd.gz"
 
 LOCATIONS=(
     "/usr/libexec/cups/filter/$FILTER_NAME"
+    "/usr/libexec/cups/filter/brother_dcpt230_pjl_pdf"
+    "/usr/libexec/cups/filter/brother_dcpt230_pjl_ps"
     "/usr/local/libexec/cups/filter/$FILTER_NAME"
+    "/usr/local/libexec/cups/filter/brother_dcpt230_pjl_pdf"
+    "/usr/local/libexec/cups/filter/brother_dcpt230_pjl_ps"
     "/Library/Printers/Brother/DCP-T230/$FILTER_NAME"
+    "/Library/Printers/Brother/DCP-T230/brother_dcpt230_pjl.py"
+    "/Library/Printers/Brother/DCP-T230/brother_dcpt230_pjl_pdf"
+    "/Library/Printers/Brother/DCP-T230/brother_dcpt230_pjl_ps"
     "/Library/Printers/PPDs/Contents/Resources/$PPD_NAME"
 )
 

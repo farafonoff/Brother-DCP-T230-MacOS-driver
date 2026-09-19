@@ -44,10 +44,15 @@ rm -f "$FILTER_DIR/.wtest"
 
 # --- Install the filters ---------------------------------------------------
 mkdir -p "$VENDOR_DIR"
-for f in "$FILTER_NAME" brother_dcpt230_pjl_pdf brother_dcpt230_pjl_ps; do
+for f in "$FILTER_NAME" brother_dcpt230_pjl.py brother_dcpt230_pjl_pdf brother_dcpt230_pjl_ps; do
+    [[ -f "$SCRIPT_DIR/$f" ]] || continue
     install -m 0755 "$SCRIPT_DIR/$f" "$VENDOR_DIR/$f"
-    ln -sf "$VENDOR_DIR/$f" "$FILTER_DIR/$f"
-    log "installed: $VENDOR_DIR/$f → $FILTER_DIR/$f"
+    if [[ "$f" != *.py ]]; then
+        ln -sf "$VENDOR_DIR/$f" "$FILTER_DIR/$f"
+        log "installed: $VENDOR_DIR/$f → $FILTER_DIR/$f"
+    else
+        log "installed: $VENDOR_DIR/$f"
+    fi
 done
 
 # --- Install the PPD (gzipped, where macOS expects it) ---------------------
@@ -81,12 +86,12 @@ fi
 if [[ -n "$PRINTER_URI" ]]; then
     read -r -p "[install] Register CUPS queue '$PRINTER_NAME' using $PRINTER_URI? [y/N] " ans
     if [[ "${ans:-n}" =~ ^[Yy]$ ]]; then
-        lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -P "$PPD_DIR/$PPD_NAME" -o media=A4
+        lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -P "$PPD_DIR/$PPD_NAME" -o media=Letter
         lpadmin -p "$PRINTER_NAME" -o printer-is-shared=false || true
         cupsenable "$PRINTER_NAME" || true
         cupsaccept "$PRINTER_NAME" || true
         log "queue '$PRINTER_NAME' created and enabled"
-        log "test with:  lp -d $PRINTER_NAME /System/Library/Fonts/Supplemental/Times\\ New\\ Roman.ttf"
+        log "test with:  lp -d $PRINTER_NAME \"$SCRIPT_DIR/test_page.pdf\""
     else
         log "skipped lpadmin registration"
     fi

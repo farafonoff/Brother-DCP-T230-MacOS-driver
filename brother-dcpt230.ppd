@@ -40,6 +40,7 @@
 *% so all steps including the final printer filter must be cupsFilter2.
 *% Output type application/vnd.cups-raw signals "send raw to the backend".
 *cupsFilter2: "image/pwg-raster application/vnd.cups-raw 0 brother_dcpt230_pjl"
+*cupsFilter2: "application/vnd.cups-raster application/vnd.cups-raw 0 brother_dcpt230_pjl"
 
 *% Single-step wrappers: each converts directly to vnd.cups-raw so CUPS
 *% cannot insert a pwg-raster passthrough and bypass brother_dcpt230_pjl.

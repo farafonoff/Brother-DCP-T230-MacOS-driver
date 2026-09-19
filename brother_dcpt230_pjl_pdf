@@ -4,12 +4,22 @@
 # insert a passthrough between them.
 set -o pipefail
 
+PDFTORASTER=""
 for _d in /usr/lib/cups/filter /usr/libexec/cups/filter /usr/local/libexec/cups/filter; do
-    [[ -x "$_d/pdftoraster" ]] && { SYS="$_d"; break; }
+    if [[ -x "$_d/pdftoraster" ]]; then
+        PDFTORASTER="$_d/pdftoraster"
+        SYS="$_d"
+        break
+    elif [[ -x "$_d/cgpdftoraster" ]]; then
+        PDFTORASTER="$_d/cgpdftoraster"
+        SYS="$_d"
+        break
+    fi
 done
-[[ -z "${SYS:-}" ]] && { echo "ERROR: pdftoraster not found" >&2; exit 1; }
+[[ -z "${PDFTORASTER:-}" ]] && { echo "ERROR: pdftoraster/cgpdftoraster not found" >&2; exit 1; }
 
-# Tell pdftoraster to produce image/pwg-raster (RaS2).
+# Tell rasterizer to produce image/pwg-raster (RaS2).
 export FINAL_CONTENT_TYPE=image/pwg-raster CONTENT_TYPE=application/pdf
 
-"$SYS/pdftoraster" "$@" | "$SYS/brother_dcpt230_pjl" "$1" "$2" "$3" "$4" "$5"
+"$PDFTORASTER" "$@" | "$SYS/brother_dcpt230_pjl" "$1" "$2" "$3" "$4" "$5"
+

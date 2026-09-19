@@ -121,7 +121,7 @@ sudo cupsaccept DCP_T230
 
 ```sh
 # Simple test print
-lp -d DCP_T230 /System/Library/Fonts/Supplemental/Times\ New\ Roman.ttf
+lp -d DCP_T230 test_page.pdf
 
 # Or a PDF with options:
 lp -d DCP_T230 -o media=A4 -o BRResolution=Fine -o BRMediaType=Inkjet mydoc.pdf

@@ -42,10 +42,11 @@ if [[ -z "$URI" ]]; then
 fi
 
 log "registering $PRINTER_NAME -> $URI"
-lpadmin -p "$PRINTER_NAME" -E -v "$URI" -P "$PPD_PATH"
+lpadmin -p "$PRINTER_NAME" -E -v "$URI" -P "$PPD_PATH" -o media=Letter
 lpadmin -p "$PRINTER_NAME" -o printer-is-shared=false || true
 cupsenable "$PRINTER_NAME" || true
 cupsaccept "$PRINTER_NAME" || true
 
 log "done. Test with:"
-log "    lp -d $PRINTER_NAME <some.pdf>"
+log "    lp -d $PRINTER_NAME \"$SCRIPT_DIR/test_page.pdf\""
+

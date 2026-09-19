@@ -20,7 +20,7 @@ import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
-_MODULE_PATH = Path(__file__).with_name("brother_dcpt230_pjl")
+_MODULE_PATH = Path(__file__).with_name("brother_dcpt230_pjl.py")
 _loader = SourceFileLoader("brother_dcpt230_pjl", str(_MODULE_PATH))
 _spec = importlib.util.spec_from_loader(_loader.name, _loader)
 filt = importlib.util.module_from_spec(_spec)
