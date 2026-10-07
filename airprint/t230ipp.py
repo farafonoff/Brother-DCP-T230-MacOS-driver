@@ -164,6 +164,10 @@ class Handler(BaseHTTPRequestHandler):
     queue = "DCP_T230"
     cups_host, cups_port = "localhost", 631
 
+    def setup(self):
+        super().setup()
+        self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
     def log_message(self, fmt, *args):
         sys.stderr.write("t230ipp: " + fmt % args + "\n")
 
@@ -193,18 +197,28 @@ class Handler(BaseHTTPRequestHandler):
         t0, sent = time.monotonic(), len(head) + len(rest)
         try:
             conn = http.client.HTTPConnection(self.cups_host, self.cups_port, timeout=600)
+            conn.connect()
+            conn.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             conn.putrequest("POST", f"/printers/{self.queue}", skip_host=False)
             conn.putheader("Content-Type", "application/ipp")
             conn.putheader("Transfer-Encoding", "chunked")
             conn.endheaders()
 
-            def send(data):
-                if data:
-                    conn.send(f"{len(data):x}\r\n".encode() + data + b"\r\n")
-            send(head + rest)
+            # Clients (CUPS) upload in ~2 KB chunks; forward in big writes so
+            # neither Nagle nor per-chunk Python overhead throttles the job.
+            pend = bytearray()
+
+            def flush():
+                if pend:
+                    conn.send(f"{len(pend):x}\r\n".encode() + pend + b"\r\n")
+                    pend.clear()
+            pend += head + rest
             for chunk in gen:
                 sent += len(chunk)
-                send(chunk)
+                pend += chunk
+                if len(pend) >= 256 * 1024:
+                    flush()
+            flush()
             conn.send(b"0\r\n\r\n")
             resp = conn.getresponse()
             body = resp.read()
