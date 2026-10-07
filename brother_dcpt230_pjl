@@ -56,6 +56,9 @@ import time
 from typing import Dict, Tuple
 
 
+VERSION = "0.2"
+BUILD = "dev"   # stamped with the git commit by install-linux.sh
+
 ESC = b"\x1b"
 UEL = ESC + b"%-12345X"
 
@@ -575,7 +578,7 @@ def main(argv) -> int:
 
     opts = parse_options(options)
 
-    log("INFO", f"Brother DCP-T230 macOS filter: job={job_id} user={user!r} title={title!r}")
+    log("INFO", f"Brother DCP-T230 filter {VERSION} (build {BUILD}): job={job_id} user={user!r} title={title!r}")
     log("DEBUG", f"Options: {opts}")
 
     # Input ----------------------------------------------------------------

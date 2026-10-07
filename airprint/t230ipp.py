@@ -19,6 +19,9 @@ import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+VERSION = "0.2"
+BUILD = "dev"   # stamped with the git commit by install-linux.sh
+
 OP_GET_PRINTER_ATTRS = 0x000B
 
 TAG_END = 0x03
@@ -251,7 +254,7 @@ def main():
     Handler.cups_port = int(port)
     host, lport = a.listen.rsplit(":", 1)
     srv = ThreadingHTTPServer((host, int(lport)), Handler)
-    sys.stderr.write(f"t230ipp: {a.listen} -> cups {a.cups} queue {a.queue}\n")
+    sys.stderr.write(f"t230ipp {VERSION} (build {BUILD}): {a.listen} -> cups {a.cups} queue {a.queue}\n")
     srv.serve_forever()
 
 

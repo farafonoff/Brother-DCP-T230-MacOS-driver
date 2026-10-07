@@ -17,6 +17,8 @@ lpstat -p "$QUEUE" >/dev/null 2>&1 || { log "CUPS queue '$QUEUE' not found"; exi
 
 install -d /usr/local/lib/t230ipp
 install -m 0755 "$SCRIPT_DIR/t230ipp.py" "$BIN"
+BUILD="$(git -c safe.directory="*" -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+sed -i "s/^BUILD = \"dev\".*/BUILD = \"$BUILD\"/" "$BIN"
 
 cat > /etc/systemd/system/t230-airprint.service <<UNIT
 [Unit]

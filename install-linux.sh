@@ -63,6 +63,8 @@ fi
 install -m 0755 -o root -g root "$FILTER_SRC"                    "$FILTER_DIR/$FILTER_NAME"
 install -m 0755 -o root -g root "$SCRIPT_DIR/brother_dcpt230_pjl_pdf" "$FILTER_DIR/brother_dcpt230_pjl_pdf"
 install -m 0755 -o root -g root "$SCRIPT_DIR/brother_dcpt230_pjl_ps"  "$FILTER_DIR/brother_dcpt230_pjl_ps"
+BUILD="$(git -c safe.directory="*" -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+sed -i "s/^BUILD = \"dev\".*/BUILD = \"$BUILD\"/" "$FILTER_DIR/$FILTER_NAME"
 log "installed filters: $FILTER_DIR/$FILTER_NAME, brother_dcpt230_pjl_pdf, brother_dcpt230_pjl_ps"
 
 # --- Install the PPD ----------------------------------------------------------
