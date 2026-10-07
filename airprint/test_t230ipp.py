@@ -141,5 +141,24 @@ class EndToEnd(unittest.TestCase):
             self.assertIn(b"ipp://localhost:%d/printers/DCP_T230" % self.cups.server_port, body)
 
 
+class DualStack(unittest.TestCase):
+    def test_accepts_ipv4_and_ipv6(self):
+        import socket
+        srv = ipp.make_server("[::]:0", ipp.Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            for fam, addr in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
+                with self.subTest(addr=addr):
+                    try:
+                        s = socket.socket(fam)
+                        s.settimeout(3)
+                        s.connect((addr, srv.server_port))
+                    except OSError as e:
+                        self.skipTest(f"{addr} unavailable here: {e}")
+                    s.close()
+        finally:
+            srv.shutdown()
+
+
 if __name__ == "__main__":
     unittest.main()

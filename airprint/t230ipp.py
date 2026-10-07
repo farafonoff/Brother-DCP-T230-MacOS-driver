@@ -9,7 +9,7 @@ rewrites the Get-Printer-Attributes response so the printer offers just
 image/urf (+ image/pwg-raster). Clients then rasterize on their own CPU and
 the box merely converts headers (see brother_dcpt230_pjl).
 
-stdlib only. Run:  t230ipp.py --queue DCP_T230 --listen 0.0.0.0:8631
+stdlib only. Run:  t230ipp.py --queue DCP_T230 --listen [::]:8631
 """
 
 import argparse
@@ -19,7 +19,7 @@ import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.2"
+VERSION = "0.3"
 BUILD = "dev"   # stamped with the git commit by install-linux.sh
 
 OP_GET_PRINTER_ATTRS = 0x000B
@@ -243,17 +243,38 @@ class Handler(BaseHTTPRequestHandler):
         self._reply(status, body)
 
 
+class DualStackServer(ThreadingHTTPServer):
+    """Listen on IPv6 and IPv4. mDNS hands clients the link-local IPv6
+    address first; an IPv4-only listener makes them stall and retry."""
+    address_family = socket.AF_INET6
+
+    def server_bind(self):
+        self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        super().server_bind()
+
+
+def make_server(listen, handler):
+    host, port = listen.rsplit(":", 1)
+    host = host.strip("[]")
+    if host in ("", "::", "0.0.0.0"):
+        try:
+            return DualStackServer(("::", int(port)), handler)
+        except OSError as e:
+            sys.stderr.write(f"t230ipp: IPv6 unavailable ({e}), IPv4 only\n")
+            host = "0.0.0.0"
+    return ThreadingHTTPServer((host, int(port)), handler)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--queue", default="DCP_T230")
-    ap.add_argument("--listen", default="0.0.0.0:8631")
+    ap.add_argument("--listen", default="[::]:8631")
     ap.add_argument("--cups", default="localhost:631")
     a = ap.parse_args()
     Handler.queue = a.queue
     Handler.cups_host, port = a.cups.rsplit(":", 1)
     Handler.cups_port = int(port)
-    host, lport = a.listen.rsplit(":", 1)
-    srv = ThreadingHTTPServer((host, int(lport)), Handler)
+    srv = make_server(a.listen, Handler)
     sys.stderr.write(f"t230ipp {VERSION} (build {BUILD}): {a.listen} -> cups {a.cups} queue {a.queue}\n")
     srv.serve_forever()
 

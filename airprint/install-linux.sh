@@ -27,7 +27,7 @@ After=cups.service network-online.target
 Wants=cups.service
 
 [Service]
-ExecStart=/usr/bin/python3 $BIN --queue $QUEUE --listen 0.0.0.0:$PORT
+ExecStart=/usr/bin/python3 $BIN --queue $QUEUE --listen [::]:$PORT
 Restart=on-failure
 DynamicUser=yes
 
