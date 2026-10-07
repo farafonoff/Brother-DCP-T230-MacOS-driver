@@ -38,6 +38,8 @@ UUID_FILE=/etc/t230-airprint.uuid
 UUID="$(cat "$UUID_FILE")"
 
 # Bonjour announcement (avahi picks up files in this dir automatically).
+# Deliberately no Brother/DCP-T230 identity (usb_MFG/MDL, product): macOS would
+# match it to a locally installed native driver instead of driverless AirPrint.
 cat > /etc/avahi/services/t230-airprint.service <<AVAHI
 <?xml version="1.0" standalone='no'?>
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
@@ -50,10 +52,7 @@ cat > /etc/avahi/services/t230-airprint.service <<AVAHI
     <txt-record>txtvers=1</txt-record>
     <txt-record>qtotal=1</txt-record>
     <txt-record>rp=ipp/print</txt-record>
-    <txt-record>ty=Brother DCP-T230 (AirPrint)</txt-record>
-    <txt-record>product=(DCP-T230)</txt-record>
-    <txt-record>usb_MFG=Brother</txt-record>
-    <txt-record>usb_MDL=DCP-T230</txt-record>
+    <txt-record>ty=$NAME</txt-record>
     <txt-record>pdl=image/urf,image/pwg-raster</txt-record>
     <txt-record>URF=V1.4,CP1,W8,PQ4,SRGB24,RS300,FN3</txt-record>
     <txt-record>Color=T</txt-record>
