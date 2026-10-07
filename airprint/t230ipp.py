@@ -16,6 +16,7 @@ import argparse
 import http.client
 import socket
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 OP_GET_PRINTER_ATTRS = 0x000B
@@ -189,6 +190,7 @@ class Handler(BaseHTTPRequestHandler):
         head = bytes(buf[:8]) + encode(rewrite_request(recs, self.queue, self.cups_port))
         rest = bytes(buf[end:])
 
+        t0, sent = time.monotonic(), len(head) + len(rest)
         try:
             conn = http.client.HTTPConnection(self.cups_host, self.cups_port, timeout=600)
             conn.putrequest("POST", f"/printers/{self.queue}", skip_host=False)
@@ -201,12 +203,15 @@ class Handler(BaseHTTPRequestHandler):
                     conn.send(f"{len(data):x}\r\n".encode() + data + b"\r\n")
             send(head + rest)
             for chunk in gen:
+                sent += len(chunk)
                 send(chunk)
             conn.send(b"0\r\n\r\n")
             resp = conn.getresponse()
             body = resp.read()
             status = resp.status
             conn.close()
+            if op == 0x0002:
+                self.log_message("Print-Job: %d bytes in %.1fs, cups status %d", sent, time.monotonic() - t0, status)
         except (OSError, http.client.HTTPException) as e:
             self.log_message("cups forward failed: %s", e)
             return self._reply(503)

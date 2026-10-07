@@ -52,6 +52,7 @@ import os
 import shlex
 import struct
 import sys
+import time
 from typing import Dict, Tuple
 
 
@@ -607,6 +608,8 @@ def main(argv) -> int:
         rewriter = PwgRewriter(out)
         urf = None
         total = 0
+        t_start = time.monotonic()
+        t_conv = 0.0
         chunk = 256 * 1024
         while True:
             buf = src.read(chunk)
@@ -617,7 +620,9 @@ def main(argv) -> int:
                 urf = UrfConverter(out)
                 log("INFO", "input is Apple Raster (image/urf) — converting to PWG")
             if urf is not None:
+                t0 = time.monotonic()
                 urf.feed(buf)
+                t_conv += time.monotonic() - t0
             elif rewriter.state == "PASSTHRU":
                 rewriter.passthrough(buf)
             else:
@@ -628,7 +633,8 @@ def main(argv) -> int:
             out.write(bytes(rewriter.buf))
 
         out.flush()
-        log("INFO", f"Forwarded {total} bytes of raster")
+        log("INFO", f"Forwarded {total} bytes of raster in "
+                 f"{time.monotonic() - t_start:.1f}s (URF convert {t_conv:.1f}s)")
 
         # 3) PJL postamble ------------------------------------------------
         out.write(build_postamble(title))
