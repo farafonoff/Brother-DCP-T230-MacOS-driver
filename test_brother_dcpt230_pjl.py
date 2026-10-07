@@ -148,5 +148,127 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(out.getvalue(), expected)
 
 
+# ---------------------------------------------------------------------------
+# Apple Raster (image/urf) -> PWG
+# ---------------------------------------------------------------------------
+
+def urf_page(bpp, width, height, lines, dpi=300):
+    hdr = bytes([bpp, 1 if bpp == 24 else 0, 1, 4]) + b"\0" * 8
+    hdr += struct.pack(">III", width, height, dpi) + b"\0" * 8
+    return hdr + b"".join(lines)
+
+
+def urf_file(pages):
+    return b"UNIRAST\x00" + struct.pack(">I", len(pages)) + b"".join(pages)
+
+
+def decode_lines(body, width, px, height):
+    """Independent decoder: expand coded lines to raw rows (handles code 128)."""
+    rows, pos = [], 0
+    while len(rows) < height:
+        rep = body[pos] + 1
+        pos += 1
+        row = bytearray()
+        while len(row) < width * px:
+            n = body[pos]
+            pos += 1
+            if n < 128:
+                row += body[pos:pos + px] * (n + 1)
+                pos += px
+            elif n == 128:
+                row += b"\xff" * (width * px - len(row))
+            else:
+                c = 257 - n
+                row += body[pos:pos + c * px]
+                pos += c * px
+        assert len(row) == width * px
+        rows += [bytes(row)] * rep
+    return rows[:height], pos
+
+
+def convert_urf(data, chunk=None):
+    out = io.BytesIO()
+    conv = filt.UrfConverter(out)
+    if chunk is None:
+        conv.feed(data)
+    else:
+        for i in range(0, len(data), chunk):
+            conv.feed(data[i:i + chunk])
+    return out.getvalue()
+
+
+class UrfTests(unittest.TestCase):
+    W, H = 300, 4
+    # rgb: one literal run of 3 px, one repeat of 297 px (2 groups: 128+128+41)
+    LINE_A = bytes([0]) + bytes([256 - 2]) + b"\x01\x02\x03" * 3 + \
+        bytes([127]) + b"\x09\x09\x09" + bytes([127]) + b"\x09\x09\x09" + \
+        bytes([40]) + b"\x09\x09\x09"
+    # 2 identical lines: 10 px literal-ish then 'fill rest with white'
+    LINE_B = bytes([1]) + bytes([9]) + b"\x05\x06\x07" + bytes([128])
+
+    def make(self):
+        lines = [self.LINE_A, self.LINE_B, self.LINE_A]   # 1 + 2 + 1 = 4 lines
+        return urf_file([urf_page(24, self.W, self.H, lines)])
+
+    def test_header_and_sync(self):
+        out = convert_urf(self.make())
+        self.assertEqual(out[:4], b"RaS2")
+        h = out[4:4 + filt.PWG_HEADER_SIZE]
+        u = lambda o: struct.unpack_from(">I", h, o)[0]
+        self.assertEqual((u(372), u(376), u(388), u(392)), (300, 4, 24, 900))
+        self.assertEqual((u(276), u(280), u(400), u(420)), (300, 300, 19, 3))
+        self.assertEqual(h[128:132], b"auto")
+        self.assertEqual(h[0:9], b"PwgRaster")
+
+    def test_body_decodes_to_same_pixels_and_has_no_fill_code(self):
+        out = convert_urf(self.make())
+        body = out[4 + filt.PWG_HEADER_SIZE:]
+        rows, used = decode_lines(body, self.W, 3, self.H)
+        self.assertEqual(used, len(body))
+        a, _ = decode_lines(self.LINE_A, self.W, 3, 1)
+        b, _ = decode_lines(self.LINE_B, self.W, 3, 1)
+        self.assertEqual(rows, [a[0], b[0], b[0], a[0]])
+        self.assertTrue(rows[1].endswith(b"\xff" * 3 * 200))
+        # re-decode while rejecting code 128 outright
+        pos = 0
+        while pos < len(body):
+            pos += 1
+            x = 0
+            while x < self.W:
+                n = body[pos]
+                self.assertNotEqual(n, 128)
+                if n < 128:
+                    pos += 4; x += n + 1
+                else:
+                    c = 257 - n; pos += 1 + 3 * c; x += c
+
+    def test_every_chunking_gives_identical_output(self):
+        data = self.make()
+        ref = convert_urf(data)
+        for chunk in (1, 2, 7, 31, 100):
+            with self.subTest(chunk=chunk):
+                self.assertEqual(convert_urf(data, chunk), ref)
+
+    def test_multiple_pages_and_gray(self):
+        gray_line = bytes([0]) + bytes([127]) + b"\x80" + bytes([127]) + b"\x80" + bytes([43]) + b"\x80"
+        p1 = urf_page(8, 300, 2, [gray_line, gray_line])
+        p2 = urf_page(8, 300, 1, [gray_line])
+        out = convert_urf(urf_file([p1, p2]), chunk=13)
+        self.assertEqual(out[:4], b"RaS2")
+        pos = 4
+        for h_px in (2, 1):
+            h = out[pos:pos + filt.PWG_HEADER_SIZE]
+            self.assertEqual(struct.unpack_from(">I", h, 376)[0], h_px)
+            self.assertEqual(struct.unpack_from(">I", h, 400)[0], 18)
+            pos += filt.PWG_HEADER_SIZE
+            rows, used = decode_lines(out[pos:], 300, 1, h_px)
+            pos += used
+        self.assertEqual(pos, len(out))
+
+    def test_bad_magic_raises(self):
+        with self.assertRaises(ValueError):
+            convert_urf(b"NOTURF!!" + b"\0" * 64)
+
+
 if __name__ == "__main__":
     unittest.main()

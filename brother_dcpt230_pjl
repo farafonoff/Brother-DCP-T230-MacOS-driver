@@ -421,6 +421,143 @@ class PwgRewriter:
 
 
 # ----------------------------------------------------------------------
+# Apple Raster (image/urf) -> PWG Raster v2
+# ----------------------------------------------------------------------
+#
+# URF layout (big-endian):
+#   file header : "UNIRAST\0" + u32 page count (0 when streaming)
+#   page header : 32 bytes
+#       0 u8 bits/pixel   1 u8 colorspace   2 u8 duplex   3 u8 quality
+#       4..11 reserved    12 u32 width      16 u32 height  20 u32 dpi
+#       24..31 reserved
+#   page body   : `height` lines, each coded as
+#       u8 (line repeat count - 1), then PackBits-style pixel runs:
+#         0..127   repeat next pixel n+1 times
+#         129..255 257-n literal pixels follow
+#         128      fill the rest of the line with white
+# PWG Raster uses the identical body coding, so pixel data is copied
+# verbatim. Only the headers differ, plus code 128, which we expand into
+# explicit white runs in case Brother's firmware doesn't implement it.
+
+URF_MAGIC = b"UNIRAST\x00"
+URF_FILE_HEADER_SIZE = 12
+URF_PAGE_HEADER_SIZE = 32
+
+
+def build_pwg_header_from_urf(bpp: int, width: int, height: int, dpi: int) -> bytearray:
+    """Synthesize the page header rastertopwg would emit for this page."""
+    hdr = bytearray(PWG_HEADER_SIZE)
+    hdr[0:9] = b"PwgRaster"
+    gray = bpp == 8
+    struct.pack_into(">II", hdr, 276, dpi, dpi)
+    struct.pack_into(">II", hdr, 372, width, height)
+    struct.pack_into(">III", hdr, 384, 8, bpp, width * bpp // 8)
+    struct.pack_into(">I", hdr, 400, 18 if gray else 19)   # sGray / sRGB
+    struct.pack_into(">I", hdr, 420, 1 if gray else 3)
+    return patch_pwg_header(hdr)
+
+
+class UrfConverter:
+    """Stream converter: URF in, PWG Raster v2 out (headers rewritten)."""
+
+    def __init__(self, out):
+        self.out = out
+        self.buf = bytearray()
+        self.state = "FILE"      # FILE -> PAGE -> BODY -> PAGE -> ...
+        self.px = 0              # bytes per pixel
+        self.width = 0
+        self.lines_left = 0
+        self.pages = 0
+
+    def feed(self, data: bytes) -> None:
+        self.buf.extend(data)
+        pieces = []
+        pos = 0
+        buf = self.buf
+        while True:
+            if self.state == "FILE":
+                if len(buf) - pos < URF_FILE_HEADER_SIZE:
+                    break
+                if bytes(buf[pos:pos + 8]) != URF_MAGIC:
+                    raise ValueError("not an Apple Raster (URF) stream")
+                pos += URF_FILE_HEADER_SIZE
+                pieces.append(PWG_SYNC)
+                self.state = "PAGE"
+            elif self.state == "PAGE":
+                if len(buf) - pos < URF_PAGE_HEADER_SIZE:
+                    break
+                bpp, _cs, _dup, _q = buf[pos:pos + 4]
+                width, height, dpi = struct.unpack_from(">III", buf, pos + 12)
+                pos += URF_PAGE_HEADER_SIZE
+                if bpp not in (8, 24):
+                    raise ValueError(f"unsupported URF bits/pixel: {bpp}")
+                self.px, self.width, self.lines_left = bpp // 8, width, height
+                if self.pages == 0:
+                    log("DEBUG", f"URF page: {width}x{height}px @ {dpi}dpi, {bpp}bpp")
+                self.pages += 1
+                pieces.append(bytes(build_pwg_header_from_urf(bpp, width, height, dpi)))
+                self.state = "BODY"
+            else:  # BODY
+                pos = self._body(buf, pos, pieces)
+                if self.state == "BODY":
+                    break
+        del buf[:pos]
+        if pieces:
+            self.out.write(b"".join(pieces))
+
+    def _body(self, buf, pos: int, pieces: list) -> int:
+        """Consume whole lines; return new position. Switches to PAGE when done."""
+        end = len(buf)
+        px, width = self.px, self.width
+        white = b"\xff" * px
+        run_start = pos
+        while self.lines_left > 0:
+            line_start = p = pos
+            if p >= end:
+                break
+            rep = buf[p] + 1
+            p += 1
+            x = 0
+            fill_at = -1
+            while x < width:
+                if p >= end:
+                    break
+                n = buf[p]
+                if n < 128:
+                    p += 1 + px
+                    x += n + 1
+                elif n == 128:
+                    fill_at = p
+                    p += 1
+                    break
+                else:
+                    c = 257 - n
+                    p += 1 + c * px
+                    x += c
+            else:
+                fill_at = -1
+            if p > end or (x < width and fill_at < 0):
+                break                      # incomplete line, wait for more data
+            if fill_at >= 0:
+                if line_start > run_start:
+                    pieces.append(bytes(buf[run_start:line_start]))
+                rem = width - x
+                full, tail = divmod(rem, 128)
+                fix = bytes(buf[line_start:fill_at]) + (b"\x7f" + white) * full
+                if tail:
+                    fix += bytes((tail - 1,)) + white
+                pieces.append(fix)
+                run_start = p
+            pos = p
+            self.lines_left -= rep
+        if pos > run_start:
+            pieces.append(bytes(buf[run_start:pos]))
+        if self.lines_left <= 0:
+            self.state = "PAGE"
+        return pos
+
+
+# ----------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------
 
@@ -468,6 +605,7 @@ def main(argv) -> int:
 
         # 2) Stream + rewrite PWG Raster -----------------------------------
         rewriter = PwgRewriter(out)
+        urf = None
         total = 0
         chunk = 256 * 1024
         while True:
@@ -475,17 +613,22 @@ def main(argv) -> int:
             if not buf:
                 break
             total += len(buf)
-            if rewriter.state == "PASSTHRU":
+            if total == len(buf) and buf.startswith(URF_MAGIC[:4]):
+                urf = UrfConverter(out)
+                log("INFO", "input is Apple Raster (image/urf) — converting to PWG")
+            if urf is not None:
+                urf.feed(buf)
+            elif rewriter.state == "PASSTHRU":
                 rewriter.passthrough(buf)
             else:
                 rewriter.feed(buf)
         # If we never got past SYNC/HEADER (truncated input), flush whatever
         # is buffered to avoid losing bytes.
-        if rewriter.state != "PASSTHRU" and rewriter.buf:
+        if urf is None and rewriter.state != "PASSTHRU" and rewriter.buf:
             out.write(bytes(rewriter.buf))
 
         out.flush()
-        log("INFO", f"Forwarded {total} bytes of PWG raster")
+        log("INFO", f"Forwarded {total} bytes of raster")
 
         # 3) PJL postamble ------------------------------------------------
         out.write(build_postamble(title))
